@@ -1,0 +1,6 @@
+function M = dh(a, d, al, th)
+% Computes Denavit-Hartenberg Matrix
+
+M = [cos(th), -sin(th)*cos(al), sin(th)*sin(al), a*cos(th);...
+     sin(th), cos(th)*cos(al), -cos(th)*sin(al), a*sin(th);...
+     0, sin(al), cos(al), d; 0,0,0,1];
