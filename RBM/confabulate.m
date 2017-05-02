@@ -18,7 +18,7 @@ function confabs = confabulate(wts,params,varargin)
 
 % remove me??
 wrkspc4;
-for j = 1:params.Nmods
+for j = 1:length(params.mods)
     h = figure(j); hold on;
     ahandle(j) = get(h,'CurrentAxes');
     % set(h,'position',[1450 552 560 420]); % [1665 377 560 420])
@@ -27,38 +27,49 @@ end
 smin = params.smin;
 smax = params.smax;
 range = smax - smin;
-Nmods = params.Nmods;
+Nmods = length(params.mods);
 PLOT = 1;
 
 % init
 nBurn = 100;
 nSamples = 5000;
-RBMwts = wts(end/2:end/2+1);
-RBMparams = params;
-RBMparams.N = params.N;                         % *** see (1) ***
-RBMparams.numsUnits = params.numsUnits(end-1:end);
-RBMparams.typeUnits = params.typeUnits(end-1:end);
-L = size(RBMwts{1},2);
+EFHwts = wts(end/2:end/2+1);
+EFHparams = params;
+EFHparams.N = params.N;                         % *** see (1) ***
+EFHparams.numsUnits = params.numsUnits(end-1:end);
+EFHparams.typeUnits = params.typeUnits(end-1:end);
+%%% L = size(RBMwts{1},2);
 typeUnits = params.typeUnits;
-n = params.nexperiments;
+numsUnits = params.numsUnits;
+topDstrbs = typeUnits{end};
+topNums = numsUnits{end};
+Ntrials = params.Ntrials;
 
 % randomly intialize deepest layer
-switch typeUnits{end}                           % init data (row vec!)
-    case 'Bernoulli'
-        topstates = zeros(1,L); % double(rand(1,L)>1);
-        % zeros(1,L);
-        % round(rand(1,L));
-    case 'Binomial'
-        topstates = sum(round(rand([L,n])),3);
-        % topstates = sum(round(rand(1,[L,n])),3);
-    case 'Poisson'
-        %%% topstates = poissrnd(params.g*0.5,L);
-        topstates = ignpoi(params.g*0.5,L);
-    otherwise
-        error('strange unit types! -- jgm');
+endinds = cumsum(numsUnits);
+startinds = [1, endinds(1:end-1)+1];
+for iGrp = 1:length(topDstrbs)
+    switch typeUnits{end}                           % init data (row vec!)
+        case 'Bernoulli'
+            topstates(startinds(iGrp):endinds(iGrp)) =...
+                zeros(1,topNums(iGrp)); % double(rand(1,L)>1);
+            % zeros(1,L);
+            % round(rand(1,L));
+        case 'Binomial'
+            topstates(startinds(iGrp):endinds(iGrp)) =...
+                sum(round(rand([topNums(iGrp),Ntrials])),3);
+            % topstates = sum(round(rand(1,[L,n])),3);
+        case 'Poisson'
+            g = mean(mean([params.gmin; params.gmax]));
+            %%% topstates = poissrnd(g*0.5,L);
+            topstates(startinds(iGrp):endinds(iGrp)) =...
+                ignpoi(g*0.5,topNums(iGrp));
+        otherwise
+            error('strange unit types! -- jgm');
+    end
 end
-penstates = feedforward(topstates,RBMwts{2}(1:end-1,:),RBMwts{2}(end,:),...
-    RBMparams.typeUnits{2},RBMparams);
+penstates = invParamMap(topstates,EFHwts{2}(1:end-1,:),EFHwts{2}(end,:),...
+    EFHparams.typeUnits{2},EFHparams.numsUnits{2},EFHparams);
 
 % get varargs
 for i=1:2:length(varargin)
@@ -71,9 +82,11 @@ for i=1:2:length(varargin)
             bottomstates = varargin{i+1};
             states = bottomstates;
             for layer = 1:length(wts)/2-1
-                means = feedforward(states,wts{layer}(1:end-1,:),...
-                    wts{layer}(end,:),typeUnits{layer+1},params);
-                states = sampler(means,typeUnits{layer+1},params);
+                means = invParamMap(states,wts{layer}(1:end-1,:),...
+                    wts{layer}(end,:),typeUnits{layer+1},...
+                    numsUnits{layer+1},params);
+                states = sampleT(means,typeUnits{layer+1},...
+                    numsUnits{layer+1},params);
             end
             penstates = states;
         otherwise
@@ -100,7 +113,7 @@ for j = 1:nSamples
     i=1;
     while i<=nBurn
         caca = 0;
-        [~, pennew] = updown(penstates,RBMwts,params,'samples','quiet');
+        pennew = updownDBN(penstates,EFHwts,params,'suffstats','quiet');
         % *** see (1) ***
         
         % check for bad points
@@ -172,9 +185,9 @@ for j = 1:nSamples
     
 %     % pass these data down through each layer to the "output"
 %     for layer = (length(wts)/2+2):length(wts)
-%         means = feedforward(states,wts{layer}(1:end-1,:),...
+%         means = invParamMap(states,wts{layer}(1:end-1,:),...
 %             wts{layer}(end,:),typeUnits{length(wts)-layer+1},params);
-%         states = sampler(means,typeUnits{length(wts)-layer+1},params);
+%         states = sampleT(means,typeUnits{length(wts)-layer+1},params);
 %     end
      confabs(j,:) = states;
      

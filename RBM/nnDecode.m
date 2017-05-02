@@ -51,12 +51,11 @@ for i = 1:2:length(varargin)
 end
 
 % generate data
-[D0,S0] = DATAGENPP(1000,params,datagenargs{:});
+Nexamples = 40000;
+[Di,Si] = generateData(Nexamples,params,datagenargs{:});
 
 % up-down pass
-[Di,Si] = longdata(D0,S0);
-clear D0 x0;
-[avgErr,Do] = updown(Di,wts,params,'means');
+Do = updownDBN(Di,wts,params,'means');
 
 % get statistics using normal (CoM) decoding
 [statsL,statsN, ~, ShatNo] = estStatsCorePP(Si,params,'CoM',Di,Do);

@@ -17,6 +17,6 @@ function u = unifSmplAboutCenter(cntrs,swing,Nsamples)
 %-------------------------------------------------------------------------%
 
 Ncntrs = size(cntrs,2);
-u = bsxfun(@times,1 + swing*2*(rand(Nsamples,Ncntrs,'like',cntrs)-0.5),cntrs);
+u = (1 + swing*2*(rand(Nsamples,Ncntrs,'like',cntrs)-0.5)).*cntrs;
 
 end

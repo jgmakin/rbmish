@@ -5,10 +5,12 @@ function Z = scalefxn(X,xmin,xmax,zmin,zmax)
 %   SCALEFXN transforms x \in [xmin, xmax] into z \in [zmin, zmax] using an
 %   affine rescaling.
 %
-%   NB that X is expected to have the same number of *rows* as elements of
-%   xmin (or xmax, zmin, zmax).
+%   NB: X must have size Nexamples x Ndims, where Ndims is the common
+%   length of xmin, xmax, zmin, and zmax.  That is, X is in JGMSTD format.
 
 %-------------------------------------------------------------------------%
+% Revised: 08/24/16
+%   -changed expected shape of inputs!!
 % Revised: 07/24/14
 %   -updated to use binary singleton expansion (bsxfun)
 % Revised: 05/30/13
@@ -21,11 +23,11 @@ function Z = scalefxn(X,xmin,xmax,zmin,zmax)
 %-------------------------------------------------------------------------%
 
 % vectorize
-xmin = xmin(:); zmin = zmin(:); 
-xmax = xmax(:); zmax = zmax(:); 
+xmin = xmin(:)'; zmin = zmin(:)'; 
+xmax = xmax(:)'; zmax = zmax(:)'; 
 
-% opaque, fast code
-rowScaling = (zmax - zmin)./(xmax - xmin);
-Z = bsxfun(@plus, bsxfun(@times,rowScaling,bsxfun(@minus,X,xmin)), zmin);
+% lots of implicit expansion
+colScaling = (zmax - zmin)./(xmax - xmin);
+Z = colScaling.*(X - xmin) +  zmin;
 
 end

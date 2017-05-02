@@ -32,6 +32,7 @@ max_iter = 3;                           % number of linesearches
 numMinibatches = 10;                    % to be combined in a big batch
 numClasses = 10;                        % there are 10 Arabic numerals
 typeUnits = params.typeUnits;
+numsUnits = params.numsUnits;
 
 makebatches;
 [Ncases,Nvis,Nbatches] = size(batchdata);
@@ -46,7 +47,8 @@ load ClassifWtsFile
 wts{end+1} = 0.1*randn(size(wts{end},2)+1, numClasses);
 
 % nodes/layer of the classifier network
-Dim = [numsUnits numClasses]';
+unitvec = arrayfun(@(i)(sum(numsUnits{i})),1:length(numsUnits));
+Dim = [unitvec numClasses]';
 
 % init errors
 test_err = zeros(maxepoch,1);
@@ -99,8 +101,9 @@ for epoch = 1:maxepoch
             % push data through the network (but not through output)
             probs = data;
             for layer = 1:length(wts)-1
-                probs = feedforward(probs,wts{layer}(1:end-1,:),...
-                    wts{layer}(end,:),typeUnits(layer+1),params);
+                probs = invParamMap(probs,wts{layer}(1:end-1,:),...
+                    wts{layer}(end,:),typeUnits{layer+1},...
+                    numsUnits{layer+1},params);
             end
             
             % update *class weights* only, with conjugate-gradient

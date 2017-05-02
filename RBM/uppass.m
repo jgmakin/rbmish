@@ -2,6 +2,7 @@ function [train_err,train_crerr] =uppass(batchdata,batchtargets,wts,params)
 % The counterpart for classification of the encoder's updown function for
 % fine-tuning: propagate probabilities up through the network, keeping
 % track of error...
+
 %-------------------------------------------------------------------------%
 % Revised: 08/03/10
 %   -fixed the FXNs to refer to the right nodes
@@ -15,7 +16,7 @@ function [train_err,train_crerr] =uppass(batchdata,batchtargets,wts,params)
 % init
 err_cr = 0;
 counter = 0;
-[Ncases,Nvis,Nbatches] = size(batchdata);
+[Ncases,~,Nbatches] = size(batchdata);
 
 % loop through batches
 for batch = 1:Nbatches
@@ -23,17 +24,18 @@ for batch = 1:Nbatches
     target = batchtargets(:,:,batch);
 
     % push up through layers (up pass only)
-    probs = data;
+    stdParams = data;
     for layer = 1:length(wts)
-        HIDFXN = params.typeUnits{layer+1};
-        probs = feedforward(probs,wts{layer}(1:end-1,:),...
-            wts{layer}(end,:),HIDFXN,params);
+        hidDstrbs = params.typeUnits{layer+1};
+        hidNums = params.numsUnits{layer+1};
+        stdParams = invParamMap(stdParams,wts{layer}(1:end-1,:),...
+            wts{layer}(end,:),hidDstrbs,hidNums,params);
     end
-    dataout = probs;
+    dataout = stdParams;
 
     % count how often the max. output is at the same digit as the target
-    [tilde, J] = max(dataout,[],2);
-    [tilde, J1] = max(target,[],2);
+    [~, J] = max(dataout,[],2);
+    [~, J1] = max(target,[],2);
     counter = counter + length(find(J==J1));
     
     % expected log-likelihood error?

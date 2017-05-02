@@ -1,17 +1,28 @@
-function F = tiledTuning(X,g,inputUnitType,params)
+function F = tiledTuning(S,g,smin,smax,dstrbs,nums,params)
 % tiledTuning   A population of smoothly tiled tuning curves
 %
 % USAGE:
-%   F = tiledTuning(X,g,params);
+%   F = tiledTuning(X,g,smin,smax,inputDstrb,params);
 %
 % Produces a matrix F of size (Nexamples x Nneurons) when given a matrix of
-% inputs X (Nexamples x Ndims), a vector of gains g (Nexamples x 1), and
-% the params structure.
+% inputs S (Nexamples x Ndims), a vector of gains g (Nexamples x 1), the
+% range of the stimuli, smin and smax, and the params structure.
 %
 % NB: main use is in PPCencode, but it can be used on its own for a
 % "noiseless responses."
 
 %-------------------------------------------------------------------------%
+% Revised: 01/02/17
+%   -added nums argument and made dstrbs a cell array of strings rather
+%   than just a string.  Now this function has to loop through those
+%   entries, which is "more general."
+% Revised: 08/23/16
+%   -moved rescaling from generateData into this function
+% Revised: 08/22/16
+%   -added linear tuning (no preferred directions)
+% Revised: 02/23/16
+%   -changed to accommodate *array* of inputUnitTypes.
+%   -added numsUnits as an argument
 % Revised: 08/07/14
 %   -replaced machine ('domestica') check with data class check
 % Revised: 07/29/14
@@ -29,40 +40,97 @@ function F = tiledTuning(X,g,inputUnitType,params)
 %   by JGM
 %-------------------------------------------------------------------------%
 
-% params
-Info = inv(params.C);
-N = params.N;
-gridsize = params.gridsize;
-[Nexamples, Ndims] = size(X);
-Nunits = N^Ndims;
+%%% TO DO:
+% (1) make the tuning curves a seperate parameter??
+% (2) This technically accepts cell arrays dstrbs that contain more than
+% one kind of distribution--but then it just uses the same gains g and the
+% same smin and smax for all of these.  That doesn't seem useful....
 
-% build a lattice across Ndims with points at the PDs
-PDs = linspace(0,gridsize,N)*ones(1,1,'like',X);
-lattices1Dcell = mat2cell(PDs(ones(Ndims,1,'like',X),:),...
-    ones(Ndims,1),N);
-lattice = ndgrid(lattices1Dcell{:});
-latticePDs = NaN(Nunits,1,Ndims,'like',X);
-for iDim = 1:Ndims
-    thisLattice = shiftdim(lattice,iDim-1);
-    latticePDs(:,1,iDim) = thisLattice(:);
+
+if onlyOneUniqueStr(dstrbs)
+    F = stimuli2tuningCurves(S,g,smin,smax,dstrbs{1},params);
+else
+    endinds = cumsum(nums);
+    startinds = [1, endinds(1:end-1)+1];
+    for iGrp = 1:length(dstrbs)
+        F(:,startinds(iGrp):endinds(iGrp)) = stimuli2tuningCurves(...
+            S(:,startinds(iGrp):endinds(iGrp)),g,smax,smin,dstrbs{iGrp},...
+            params);
+    end
 end
-Infotensor = reshape(Info,[Ndims,1,Ndims])*ones(1,1,'like',X);
-Y = bsxfun(@minus,reshape(X,[1,Nexamples,Ndims]),latticePDs);
-YtrS = tensorOp(Y,Infotensor(:,ones(Nexamples,1,'like',X),:));
-quadraticForm = sum(YtrS.*Y,3)';
 
-%%% may ultimately want to make the tuning curves a parameter....
-switch inputUnitType
-    case {'Bernoulli','Binomial'}
+end
+%-------------------------------------------------------------------------%
+%-------------------------------------------------------------------------%
+
+
+%-------------------------------------------------------------------------%
+function F = stimuli2tuningCurves(S,g,smin,smax,dstrb,params) 
+
+switch dstrb
+    case 'StandardNormal'   % linear tuning
+        F = g.*S;
+        %%% NB that this ignores all tuning structure in params
+        
+    case {'Bernoulli','Binomial','BernoulliDropout'}
+        
+        % rescale so that stimuli span [0,1] x [0,1] x ...
+        patchmin = params.margin*ones(1,params.Ndims);
+        patchmax = patchmin + params.respLength;
+        X = scalefxn(S,smin,smax,patchmin,patchmax);
+        
         % subtract from logit(g), send through the logistic function
         logit = @(z)(log(z./(1-z)));
         logistic = @(z)(1./(1 + exp(-z)));
-        F = logistic(bsxfun(@minus,logit(g),quadraticForm/2));
+        quadraticForm = quadraticTune(X,params.C,params.N,params.gridsize);
+        F = logistic(logit(g) - quadraticForm/2);
+        
     otherwise % Gaussian tuning
-        % exponentiate to get a Gaussian, scale by gains
-        F = bsxfun(@times,g,exp(-quadraticForm/2));
+        
+        % rescale so that stimuli span [0,1] x [0,1] x ...
+        patchmin = params.margin*ones(1,params.Ndims);
+        patchmax = patchmin + params.respLength;
+        X = scalefxn(S,smin,smax,patchmin,patchmax);
+        %%% what's with the transpose??
+        
+        % exponentiate quadratic form to get a Gaussian, scale by gains
+        quadraticForm = quadraticTune(X,params.C,params.N,params.gridsize);
+        F = g.*exp(-quadraticForm/2);
 end
 
 end
+%-------------------------------------------------------------------------%
 
+%-------------------------------------------------------------------------%
+function quadraticForm = quadraticTune(X,C,N,gridsize)
+% compute (x - pd)'*Info*(x - pd)
 
+% params
+Info = inv(C);
+[Nexamples, Ndims] = size(X);
+
+% build a lattice across Ndims with points at the PDs
+PDs = linspace(0,gridsize,N)*ones(1,1,'like',X);
+latticePDs = ndlattice(Ndims,PDs);
+
+Infotensor = repmat(cast(Info,'like',X),[1,1,Nexamples]);
+Y = shiftdim(X',-1) - latticePDs;           % Nunits x Ndims x Nexamples
+YtrS = tensorOp(Y,Infotensor);              % Nunits x Ndims x Nexamples
+quadraticForm = permute(sum(YtrS.*Y,2),[3,1,2]);    % Nexamples x Nunits
+
+end
+%-------------------------------------------------------------------------%
+
+%-------------------------------------------------------------------------%
+function FLAG = onlyOneUniqueStr(strcell)
+
+d = strcell{1};
+FLAG = true;
+i=1;
+while FLAG&&(i<length(strcell))
+    FLAG = strcmp(strcell{i+1},d);
+    i=i+1;
+end
+
+end
+%-------------------------------------------------------------------------%

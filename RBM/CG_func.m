@@ -102,23 +102,24 @@ layer = layer + 1;
 
 % check the params for what kinds of nodes this layer has
 m = length(params.numsUnits);
-HIDFXN = params.typeUnits(m-abs(m-layer-1));    % (really)
+hidDstrbs = params.typeUnits{m-abs(m-layer-1)};    % (really)
+hidNums = params.numsUnits{m-abs(m-layer-1)};    
 
 % compute the activation in this layer via sigmoid or linear fxn
-activ = feedforward(input,wts{layer}(1:end-1,:),wts{layer}(end,:),...
-    HIDFXN,params);
+activ = invParamMap(input,wts{layer}(1:end-1,:),wts{layer}(end,:),...
+    hidDstrbs,hidNums,params);
 
 % recursive backprop
 if (layer < length(wts))                        % NON-OUTPUT LAYERS
     % relay final output
-    [output dEdw delta] = forwardprop(activ,data,wts,layer,OBJ,params);          
+    [output,dEdw,delta] = forwardprop(activ,data,wts,layer,OBJ,params);          
     
     % compute dE/dw for outgoing weights
     activ = [activ ones(size(activ,1),1)];      % augment for biases
     dEdw{layer+1} = activ'*delta;
     
     % update 
-    if strcmp(FXN,'Gaussian')
+    if strcmp(FXN,'StandardNormal')
         delta = (delta*wts{layer+1}');
     else
         dydx = activ.*(1-activ);

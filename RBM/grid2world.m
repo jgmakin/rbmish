@@ -4,6 +4,10 @@ function z = grid2world(zGrid,range,params)
 %   coordinates in the grid (1:N) to its true (world) representation   
 
 %-------------------------------------------------------------------------%
+% Revised: 08/24/16
+%   -changed to expect inputs (zGrid) and outputs (z) in the JGMSTD format,
+%   i.e. Nexamples x Ndims---in accordance with parallel changes to
+%   scalefxn.m.
 % Revised: 07/03/14
 %   -made a meaningless change
 % Created: 11/30/10
@@ -12,7 +16,7 @@ function z = grid2world(zGrid,range,params)
 
 % extract useful params
 N = params.N;
-oo = ones(size(zGrid,1),1);
+oo = ones(size(zGrid,2),1);
 patchmin = params.margin*oo;
 patchmax = patchmin + params.respLength;
 

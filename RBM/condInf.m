@@ -4,8 +4,10 @@ function [statsOnePass,statsFinal] = condInf(D0,S0,wts,deadstim,params)
 % This operation is sometimes referred to as "function approximation."
 %
 % USAGE:    load wtsfile.m
-%           [D0,S0] = DATAGENPP(500,params);
+%           [D0,S0] = generateData(500,params);
 %           [statsOnePass statsFinal] = condInf(D0,x0,wts,deadstim,params)
+% 
+% NB: THIS FUNCTION IS CURRENTLY BROKEN!
 
 %-------------------------------------------------------------------------%
 % Revised: 12/16/13
@@ -13,7 +15,7 @@ function [statsOnePass,statsFinal] = condInf(D0,S0,wts,deadstim,params)
 % Revised: 12/12/13
 %   -changed to accommodate new orientation of Dlong
 % Revised: 08/16/12
-%   -rewrote to accomodate params.Nmods=3.
+%   -rewrote to accomodate length(params.mods)=3.
 %   -replaced while loop with recursive updateInputs.
 %   -etc.
 % Revised: 08/17/11
@@ -22,6 +24,13 @@ function [statsOnePass,statsFinal] = condInf(D0,S0,wts,deadstim,params)
 %   -from the getNoiseFloor.m and unimodalstim.m
 %   by JGM
 %-------------------------------------------------------------------------%
+
+
+%%%%%%%%%%%%%%
+%%%% This function was broken by changes to other code, e.g. the new
+%%%% version of PPCencode.  You should re-write it.
+%%%%%%%%%%%%%%
+
 
 % init
 params.resample = 1;
@@ -32,11 +41,11 @@ clear D0 S0;
 [Nexamples,Ndims] = size(Di);
 
 % zero out one input modality, for all examples
-[Di,S.zvec] = killoneinput(Di,deadstim,params.Nmods);
+[Di,S.zvec] = killoneinput(Di,deadstim,length(params.mods));
 
 
 % stats for a single up-down pass (use neutral-space stats only)
-[~, Do] = updown(Di,wts,params,'samples');
+Do = updownDBN(Di,wts,params,'suffstats');
 [~, statsOnePass] = estStatsCorePP(Si,params,'CoM',Di,Do);
 
 % compute one-pass (normalized) reconstruction error
@@ -100,7 +109,7 @@ alpha = 0.001; % /100000/100;
 
 % increment the counter and compute the new error
 counter = counter + 1;
-[~, d_out] = updown(d_in,wts,params,'means','quiet');
+d_out = updownDBN(d_in,wts,params,'means','quiet');
 % [~, d_out] = updownfast(d_in,wts,params);
 eNEW = norm(d_in - d_out)/length(d_in);
 
@@ -137,7 +146,7 @@ function dClamped = updateWithClamp(dClamped,d_out,S,params)
 
 
 % init
-Nmods = params.Nmods;
+Nmods = length(params.mods);
 Nvis = length(dClamped);
 
 % resample spike counts (stim fixed)?
@@ -145,8 +154,8 @@ if params.resample
     
     d = zeros(Nvis/Nmods,Nmods);
     for j = 1:Nmods
-        d(:,j) = PPCencode(...
-            S.xPatch(:,j),S.gains(j),params.typeUnits{1},params);
+        d(:,j) = PPCencode(S.xPatch(:,j),S.gains(j),...
+            params.typeUnits{1},params.numsUnits{1},params);
     end
     dClamped = d(:);
 end
@@ -163,7 +172,7 @@ end
 function [xPatch,gains] = getWorldVars(s,params)
 
 % init
-Nmods = params.Nmods;
+Nmods = length(params.mods);
 Ndims = params.Ndims;
 
 % compute useful quantities for replacement sampling
@@ -171,10 +180,8 @@ if params.resample
     smin = params.smin;
     smax = params.smax;
     patchmin = params.margin*ones(1,Ndims);
-    patchmax = patchmin + params.respLength;
-    
-    gains = params.g*ones(Nmods,1);
-    if isfield(params,'gains'), gains = params.gains; end
+    patchmax = patchmin + params.respLength;   
+    gains = mean([params.gmin; params.gmax]);
     
     xPatch = zeros(Ndims,Nmods);
     for j = 1:Nmods

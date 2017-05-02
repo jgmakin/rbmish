@@ -61,7 +61,8 @@ end
 numRBMs = length(numsUnits)-1;
 
 % nodes/layer of the "unfolded" network
-Dim = numsUnits([1:end,end-1:-1:1])';
+unitvec = arrayfun(@(i)(sum(numsUnits{i})),1:length(numsUnits));
+Dim = unitvec([1:end,end-1:-1:1])';
 
 % init errors
 test_err = zeros(maxepoch,1);
@@ -71,7 +72,7 @@ train_err = zeros(maxepoch,1);
 for epoch = 1:maxepoch
 
     % COMPUTE TRAINING RECONSTRUCTION ERROR
-    [train_err(epoch) dataout] = updownfast(batchdata, wts, params); 
+    [train_err(epoch),dataout] = updownfast(batchdata, wts, params); 
 
     
     if DISP
@@ -98,7 +99,7 @@ for epoch = 1:maxepoch
     end
     
     % COMPUTE TEST RECONSTRUCTION ERROR
-    [test_err(epoch) dataout] = updownfast(testbatchdata, wts, params);  
+    [test_err(epoch),dataout] = updownfast(testbatchdata, wts, params);  
     
     % print
     fprintf(1,'Before epoch %d Train squared error: ',epoch);

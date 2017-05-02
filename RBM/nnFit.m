@@ -19,14 +19,15 @@ function net = nnFit(inputs,targets)
 
 % Create Network
 % numHiddenNeurons = 20;  % Adjust as desired
-net = newfit(inputs,targets,[10 5]);
+% net = fitnet([10 5]);
+net = fitnet([20 15]);
 net.divideParam.trainRatio = 70/100;  % Adjust as desired
 net.divideParam.valRatio = 15/100;  % Adjust as desired
 net.divideParam.testRatio = 15/100;  % Adjust as desired
 
 % Train and Apply Network
 [net,tr] = train(net,inputs,targets);
-outputs = sim(net,inputs);
+outputs = net(inputs);
 
 % Plot
 plotperf(tr)

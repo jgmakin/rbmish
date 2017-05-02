@@ -1,14 +1,14 @@
-function [wNEW,wdotNEW] = secondOrderWeightUpdate(w,wdot,u,m,b,k,FXN,params)
+function [wNEW,wdotNEW] = secondOrderWeightUpdate(w,wdot,u,m,b,k,nums,params)
 % secondOrderWeightUpdate   Update neural-network weights
 %
 % USAGE:
-%   [w,wdot] = secondOrderWeightUpdate(w,wdot,m,b,k,Ts)
+%   [w,wdot] = secondOrderWeightUpdate(w,wdot,u,m,b,k,numsUnits,params);
 %
 % Rather than making weight changes ("velocities") directly proportional to
 % the gradient (e.g., ML, CD-N, etc.), make the change in weight *velocity*
 % (i.e., acceleration) exhibit this dependence.  In other words, make the
-% gradient an "input" to a second-order discrete-time LTI system, conceived
-% as a mass-spring-damper (MSD).
+% gradient, u, an "input" to a second-order discrete-time LTI system, 
+% conceived as a mass-spring-damper (MSD).
 %
 % For a longer explanation, see your labnotes.
 %
@@ -20,7 +20,7 @@ function [wNEW,wdotNEW] = secondOrderWeightUpdate(w,wdot,u,m,b,k,FXN,params)
 %   Ts = 1
 %   m = 1/"epsilonw"
 %   k = "weightcost"
-%   1-b/m = "momentum"
+%   1-b/m*Ts = "momentum"
 %
 % NB that changes to mass in GEH's version (e.g. the lowering of learning
 % rates over time/increase in mass) do not affect the momentum, which is
@@ -42,21 +42,22 @@ function [wNEW,wdotNEW] = secondOrderWeightUpdate(w,wdot,u,m,b,k,FXN,params)
 Ts = params.Ts;
 
 % weight updates
-wNEW = w + Ts*wdot;
-switch FXN
-    case 'BP'
-        % scale params by 1/alp for Bernoulli-Bernoulli units
-        alp = 10; % params.g? That "translates" b/n Bernoulli and Poisson...
-        t = params.t;
-        wdotNEW = zeros(size(wdot),'like',wdot);
-        wdotNEW(1:t,:) = -k/m*Ts*w(1:t,:) +...
-            (0.98-b/m*Ts)*wdot(1:t,:) + Ts/m*u(1:t,:)*alp;
-        wdotNEW(t+1:end,:) = -k/m*Ts*w(t+1:end,:) +...
-            (0.98-b/m*Ts)*wdot(t+1:end,:) + Ts/m*u(t+1:end,:);
-    otherwise
-        wdotNEW = -k/m*Ts*w + (0.98-b/m*Ts)*wdot + Ts/m*u;
+%%% wNEW = w + Ts*wdot;
+if length(unique(m)) > 1
+    endinds = cumsum(nums);
+    startinds = [1, endinds(1:end-1)+1];
+    wdotNEW = zeros(size(wdot),'like',wdot);
+    for iGrp = 1:length(m)
+        inds = startinds(iGrp):endinds(iGrp);
+        wdotNEW(inds,:) = -k(iGrp)/m(iGrp)*Ts*w(inds,:) +...
+            (0.98-b(iGrp)/m(iGrp)*Ts)*wdot(inds,:) + Ts/m(iGrp)*u(inds,:);
+    end
+else
+    wdotNEW = (-k(1)/m(1)*Ts)*w + (0.98-b(1)/m(1)*Ts)*wdot + (Ts/m(1))*u;
 end
+wNEW = w + Ts*wdotNEW;
 
+end
 
 % *** (1) ***
 % Learning in neural networks is often improved by decreasing the learning
@@ -68,10 +69,13 @@ end
 % NB that, if mass is therefore considered a third state, the total system
 % is nonlinear!
 
-
-
-
-
+% *** (2) ***
+% In the recurrent models, changing the weights changes changes the "data."
+% Thus, gradients measured under one set of weights should have their
+% effect *on that set of weights*.  That requires updating the position
+% immediately, rather than waiting one iteration.  So now technically it
+% doesn't look precisely like a 2nd-order dynamical system, at least not
+% with the positions and velocities grouped this way.
 
 
 

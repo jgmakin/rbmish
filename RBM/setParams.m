@@ -1,7 +1,14 @@
-function params = setParams
+function params = setParams(varargin)
 % SETPARAMS     Sets parameters for sensory integration learning
 %   SETPARAMS sets the (reused) parameters of DBN, DATAGEN, FK2link, etc.
+
 %-------------------------------------------------------------------------%
+% Revised: 09/29/16
+%   -allowed for more general setting of parameters with variable input
+%   arguments
+% Revised: 08/25/16
+%   -unified all the rEFHs that run on (linear) PPC data
+%   -unified/functionized the learning-rate-update functions
 % Revised: 12/09/13
 %   -rationalized: put in case statements for all the different models
 % Revised: 09/07/12
@@ -17,494 +24,699 @@ function params = setParams
 %   by JGM
 %-------------------------------------------------------------------------%
 
+%%%%%%%%%%%%%
+% Consider restoring MODEL, but not as a field in params; rather, as a way
+% of running your favorite combinations of different parameters.  Then this
+% could be more conveniently called from the outside to, say, reproduce
+% some of your old results.
+%%%%%%%%%%%%%
+
 
 % what computer?
-[~,machine] = system('hostname'); 
+[~,machine] = system('hostname');
 params.machine = strtrim(machine);
 
+% variable arguments
+params.datatype     = defaulter('datatype','1Dinteg',varargin{:});
+params.Ncdsteps     = defaulter('Ncdsteps',1,varargin{:});
+params.Ncases       = defaulter('Ncases',40,varargin{:});         % 10
+params.Nbatches     = defaulter('Nbatches',1000,varargin{:});     % ?
+params.NepochsMax   = defaulter('NepochsMax',90,varargin{:});     % 50
+SensoryUnitType     = defaulter('SensoryUnitType','Poisson',varargin{:});
 
-% model
-params.MODEL = '1DrEFH';
-% params.MODEL = 'RTRBM';
-% params.MODEL = 'HHSreachData';
-% params.MODEL = '1DrEFHwithECdelayed';
-
-
-% PATH
-path(path,'../ee125/fxns');
-path('../utils',path);      % contains tex.m
-path('../utils/matlab2tikz',path);
-path(path,'../tools')
-path(path,'retired');
-path(path,'scratch');
-path(path,'tuningcurves');
-path(path,'results');
-path(path,'parallel');
-path(path,'dynamical');
-% path(path,'../PPC models');
-
-
-
-% network architecture
-params.nettype = 'ENCODER';                 % /'CLASSIFIER'/??
-% numsUnits = [500 500 2000];                 % GEH CLASSIFIER
-
-% training params                           % [GEH params??]
-params.Ncases = 40;                         % [10 cases]
-params.DBNmaxepoch = 90;                    % [50 epochs]
-params.mw =  500;                           % [50 newtons]
-params.mvb = 120;                           % [50 newtons]
-params.mhb = 120;                           % [50 newtons]
-params.b = params.mw/2;                     % [250? N-s/m]
-%%% with this setting of b, k < mw/16 to prevent oscillations; i.e., 
-%%% k < 31.25---at least for the continuous-time version.  In discrete time
-%%% your margin gets slightly bigger (k < 33.8).
-params.k = 0.001;                           % [0.02 N/m]
-params.Ts = 1;                              % "sampling interval"
-params.amass = 1.10;                        % A "matrix" for masses
-params.numCDsteps = 15;
-
-% backprop params [unused]
-params.BPmaxepoch = 5;
-params.max_iter = 3;                        % number of linesearches
-params.numMinibatches = 10;                 % to be combined in a big batch
-params.massUpdate = @(mass0,iEp)(params.amass^iEp*mass0);
 
 
 % which model?
-switch params.MODEL
+switch params.datatype
     
     case '2Dinteg'
+        params.algorithm = defaulter('algorithm','EFH',varargin{:});
         
         % data generation
-        params.Ndims = 2;                   % encoded vars/neuron
-        params.Nmods = 2;                   % number of modalities
-        params.N = 30;                      % number of neurons *** (2) ***
-        %%%params.g = 15;                      % gain
-        params.g = 0.08;
-        params.swing = 0.2;                 % swing in gain (max=1)
-        params.NS = 'Joint-Angle';          % "neutral space"
-       
-        % arm properties
-        params.thmin = [-pi/2; pi/4];   % [-pi/4; 0];
-        params.thmax = [pi/4; 3*pi/4];  % [pi/4; pi/2];
-        params.L1 = 12;                     % upper arm
-        params.L2 = 20;                     % forearm
-        
-        params = getLimits(params);
-        params.smin = [params.posmin params.thmin];
-        params.smax = [params.posmax params.thmax];
-        
-        % modality names
+        % data generation
         params.mods{1} = 'Hand-Position';
         params.mods{2} = 'Joint-Angle';
+        params.Ndims = 2;                   % encoded vars/neuron
+        params.N = 30;                      % number of neurons *** (2) ***
+        params.NS = 'Joint-Angle';          % "neutral space"
+        params.walls = 'clipping';
+        
+        % arm properties
+        thmin = [-pi/2; pi/4];              % [-pi/4; 0];
+        thmax = [pi/4; 3*pi/4];             % [pi/4; pi/2];
+        armlengths = [12; 20];
+        roboparams = getLimits(thmin,thmax,armlengths,params.Ndims,...
+            params.mods,params.NS);
+        params.smin = [roboparams.posmin roboparams.thmin];
+        params.smax = [roboparams.posmax roboparams.thmax];
+        params.roboparams = roboparams;
         
         % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis, Nvis/2];
-        %%%params.typeUnits = {'Poisson','Bernoulli'};
-        params.typeUnits = {'Bernoulli','BernoulliDropout'};
+        Nmods = length(params.mods);
+        Nvis = Nmods*params.N^params.Ndims;
+        params.numsUnits = {Nvis, Nvis/2};
+        params.typeUnits = {{'Poisson'}, {'Bernoulli'}};
+        %%%params.typeUnits = {'Bernoulli','BernoulliDropout'};
+        %%%params.typeUnits = {'Binomial','Binomial'};
         
-        % learning rates/momentum
-        params.mw =  500;                   % [50 newtons]
-        params.mvb = 120;                   % [50 newtons]
-        params.mhb = 120;                   % [50 newtons]
-        params.b = params.mw/2;             % [250? N-s/m]       
-
-
+        % gains
+        if any(strcmp(params.typeUnits{2},'BernoulliDropout'))
+            params.gmin = [0.064, 0.064];
+            params.gmax = [0.096, 0.096];
+        else
+            params.gmin = [12, 12];
+            params.gmax = [18, 18];
+        end
         
-    case '2Dtwoarms'
+        % get the "grid parameters"
+        [params.C,params.respLength,params.margin,params.gridsize,...
+            params.granularity] = getGridParams(params.Ndims,params.N,...
+            params.walls);
+        
+        % learning schedules
+        params = setLearningSchedules(1000,250,250,'exp',params);
+        params.getLatents = @(Nexamples,yrclass)(...
+            getLatentsMultisensoryIntegration(Nexamples,yrclass,...
+            params.NS,params));
+        params.getData = @(X,Q)(getDataPPC(X,Q,params));
+        params.testEFH = @(R,X,Q,wts)(testEFHPPC(R,X,Q,wts,params));
+        Ntestdata = 40000;
+        params.getTestData = @(yrclass)(generateData(...
+            Ntestdata,params.getLatents,params.getData,yrclass));
+        
+    
+    case '2Dinteg_NonFlatPrior'
+        params.algorithm = defaulter('algorithm','EFH',varargin{:});
+      
+        % data generation
+        params.mods{1} = 'Hand-Position';
+        params.mods{2} = 'Joint-Angle';
+        params.Ndims = 2;                   % encoded vars/neuron
+        params.N = 30;                      % number of neurons *** (2) ***
+        params.NS = 'Joint-Angle';          % "neutral space"
+        params.walls = 'clipping';
+        
+        % arm properties
+        thmin = [-pi/2; pi/4];              % [-pi/4; 0];
+        thmax = [pi/4; 3*pi/4];             % [pi/4; pi/2];
+        armlengths = [12; 20];
+        roboparams = getLimits(thmin,thmax,armlengths,params.Ndims,...
+            params.mods,params.NS);
+        params.smin = [roboparams.posmin roboparams.thmin];
+        params.smax = [roboparams.posmax roboparams.thmax];
+        params.roboparams = roboparams;
+        
+        % RBM units
+        Nmods = length(params.mods);
+        Nvis = Nmods*params.N^params.Ndims;
+        params.numsUnits = {Nvis, Nvis/2};
+        params.typeUnits = {{'Poisson'}, {'Bernoulli'}};
+        
+        % gains
+        params.gmin = [12, 12];
+        params.gmax = [18, 18];
+        
+        % get the "grid parameters"
+        [params.C,params.respLength,params.margin,params.gridsize,...
+            params.granularity] = getGridParams(params.Ndims,params.N,...
+            params.walls);
+        
+        % learning schedules
+        params = setLearningSchedules(2000,500,500,'exp',params);
+        params.NepochsMax = 10;
+        %%%% change me
+        p0.cov = 1.0e-03*[0.2467,0;0,0.1097];
+        p0.mu = [-0.3927;1.5708];
+        params.p0 = p0;
+        params.getLatents = @(Nexamples,yrclass)(...
+            getLatentsMultisensoryIntegration(Nexamples,yrclass,...
+            params.NS,params,'latentvarprior',p0));
+        params.getData = @(X,Q)(getDataPPC(X,Q,params));
+        params.testEFH = @(R,X,Q,wts)(testEFHPPC(R,X,Q,wts,params));
+        Ntestdata = 40000;
+        params.getTestData = @(yrclass)(generateData(...
+            Ntestdata,params.getLatents,params.getData,yrclass));
+        
+        
+        
+    case '2Dinteg_AllGains'
+        params.algorithm = defaulter('algorithm','EFH',varargin{:});
         
         % data generation
+        params.mods{1} = 'Hand-Position';
+        params.mods{2} = 'Joint-Angle';
         params.Ndims = 2;                   % encoded vars/neuron
-        params.Nmods = 2;                   % number of modalities
         params.N = 30;                      % number of neurons *** (2) ***
-        params.g = 15;                      % gain
-        params.swing = 0.2;                 % swing in gain (max=1)
-        params.NS = 'Joint-Angle-Left';    	% "neutral space"
-       
+        params.NS = 'Joint-Angle';          % "neutral space"
+        params.walls = 'clipping';
+        
         % arm properties
-        params.smin = [-pi/2 -pi/2; pi/4 pi/4];
-        params.smax = [pi/4 pi/4; 3*pi/4 3*pi/4];  % [pi/4; pi/2];
-                
+        thmin = [-pi/2; pi/4];              % [-pi/4; 0];
+        thmax = [pi/4; 3*pi/4];             % [pi/4; pi/2];
+        armlengths = [12; 20];
+        roboparams = getLimits(thmin,thmax,armlengths,params.Ndims,...
+            params.mods,params.NS);
+        params.smin = [roboparams.posmin roboparams.thmin];
+        params.smax = [roboparams.posmax roboparams.thmax];
+        params.roboparams = roboparams;
+        
+        % RBM units
+        Nmods = length(params.mods);
+        Nvis = Nmods*params.N^params.Ndims;
+        params.numsUnits = {Nvis, Nvis/2};
+        params.typeUnits = {{'Poisson'}, {'Bernoulli'}};
+        %%%params.typeUnits = {'Bernoulli','BernoulliDropout'};
+        %%%params.typeUnits = {'Binomial','Binomial'};
+        
+        % gains
+        if any(strcmp(params.typeUnits{2},'BernoulliDropout'))
+            params.gmin = [0, 0];
+            params.gmax = [0.1, 0.1];
+        else
+            params.gmin = [0, 0];
+            params.gmax = [20, 20];
+        end
+        
+        % get the "grid parameters"
+        [params.C,params.respLength,params.margin,params.gridsize,...
+            params.granularity] = getGridParams(params.Ndims,params.N,...
+            params.walls);
+        
+        % learning schedules
+        params = setLearningSchedules(250,50,50,'exp',params);
+        params.getLatents = @(Nexamples,yrclass)(...
+            getLatentsMultisensoryIntegration(Nexamples,yrclass,...
+            params.NS,params));
+        params.getData = @(X,Q)(getDataPPC(X,Q,params));
+        params.testEFH = @(R,X,Q,wts)(testEFHPPC(R,X,Q,wts,params));
+        Ntestdata = 40000;
+        params.getTestData = @(yrclass)(generateData(Ntestdata,...
+            @(Nexamples,yrclass)(...
+            getLatentsMultisensoryIntegration(Nexamples,yrclass,...
+            params.NS,setfield(setfield(params,'gmin',[2,2]),...
+            'gmax',[18,18]))),params.getData,yrclass));
+        
+        
+    case '2Dtwoarms'
+        params.algorithm = defaulter('algorithm','EFH',varargin{:});
+        
         % modality names
+        %%%% consider just calling both 'Joint-Angle'???
         params.mods{1} = 'Joint-Angle-Left';
         params.mods{2} = 'Joint-Angle-Right';
         
-        % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis, Nvis/2];
-        params.typeUnits = {'Poisson','Bernoulli'};
+        % data generation
+        params.Ndims = 2;                   % encoded vars/neuron
+        params.N = 30;                      % number of neurons *** (2) ***
+        params.NS = 'Joint-Angle-Left';    	% "neutral space"
+        params.walls = 'clipping';
+        params.gmin = [12 12];
+        params.gmax = [18 18];
         
-        % learning rates/momentum
-        params.mw =  500;                   % [50 newtons]
-        params.mvb = 120;                   % [50 newtons]
-        params.mhb = 120;                   % [50 newtons]
-        params.b = params.mw/2;             % [250? N-s/m]
+        % arm properties
+        params.smin = [-pi/2 -pi/2; pi/4 pi/4];
+        params.smax = [pi/4 pi/4; 3*pi/4 3*pi/4];
+        
+        % RBM units
+        Nmods = length(params.mods);
+        Nvis = Nmods*params.N^params.Ndims;
+        params.numsUnits = {Nvis, Nvis/2};
+        params.typeUnits = {{'Poisson'}, {'Bernoulli'}};
+        
+        % get the "grid parameters"
+        [params.C,params.respLength,params.margin,params.gridsize,...
+            params.granularity] = getGridParams(params.Ndims,params.N,...
+            params.walls);
+        
+        % learning schedules
+        params = setLearningSchedules(1000,250,250,'exp',params);
+        
+        % functions
+        params.getLatents = @(Nexamples,yrclass)(...
+            getLatentsMultisensoryIntegration(Nexamples,yrclass,...
+            params.NS,params));
+        params.getData = @(X,Q)(getDataPPC(X,Q,params));
+        params.testEFH = @(R,X,Q,wts)(testEFHPPC(R,X,Q,wts,params));
+        Ntestdata = 40000;
+        params.getTestData = @(yrclass)(generateData(...
+            Ntestdata,params.getLatents,params.getData,yrclass));        
         
         
         
     case '1Daddition'
-        
-        % data generation
-        params.Ndims = 1;                   % encoded vars/neuron
-        params.Nmods = 3;                   % number of modalities
-        %%% params.N = 60;                      % number of neurons *** (2) ***
-        params.N = 600;
-        %%% params.g = 15;                      % gain
-        params.g = 0.08;
-        params.gains = [0.03 0.09 0.03];
-        %%% params.gains = [5 20 5]; % [5 15 5];        % overwrite gains %%%%%
-        params.swing = 0.2;                 % swing in gain (max=1)
-        params.NS = 'Hand-Position';        % "neutral space"
-        
-        % arm properties
-        params.thmin = pi/6;    % pi/8; % pi/4;
-        params.thmax = 5*pi/6;  % 7*pi/8; % 3*pi/4;
-        params.L1 = 12;
-        params = getLimits(params);
-        params.smin = [params.posmin params.thmin params.eyemin];
-        params.smax = [params.posmax params.thmax params.eyemax];
+        params.algorithm = defaulter('algorithm','EFH',varargin{:});
         
         % modality names
         params.mods{1} = 'Hand-Position';
         params.mods{2} = 'Joint-Angle';
         params.mods{3} = 'Gaze-Angle';
         
-        % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        %%% params.numsUnits = [Nvis, 160];
-        params.numsUnits = [Nvis, 1200];
-        %%% params.typeUnits = {'Poisson','Bernoulli'};
-        params.typeUnits = {'Bernoulli','BernoulliDropout'};
-        
-        
-        
-        %%%%%%%%%%%%%%%%%%%%
-        params.mw = 1;
-        params.mvb = 0.25;
-        params.mhb = 0.25;
-        params.b = params.mw/2;     % => k < 0.3125 for no oscillations
-        params.k = 1e-7; % because of dropout!
-        params.DBNmaxepoch = 25;
-        %%%%%%%%%%%%%%%%%%%%
-        
-    case '1Dinteg'
-        
         % data generation
         params.Ndims = 1;                   % encoded vars/neuron
-        params.Nmods = 2;                   % number of modalities
-        params.N = 60;                      % number of neurons *** (2) ***
-        params.g = 15;                      % gain
-        params.swing = 0.2;                 % swing in gain (max=1)
-        params.NS = 'Joint-Angle';
+        params.NS = 'Hand-Position';        % "neutral space"
+        params.walls = 'clipping';
         
         % arm properties
-        params.thmin = pi/6;    % pi/8; % pi/4;
-        params.thmax = 5*pi/6;  % 7*pi/8; % 3*pi/4;
-        params.L1 = 12;
-        params = getLimits(params);
-        params.smin = [params.posmin params.thmin];
-        params.smax = [params.posmax params.thmax];
+        thmin = pi/6;
+        thmax = 5*pi/6;
+        armlengths = 12;
+        roboparams = getLimits(thmin,thmax,armlengths,params.Ndims,...
+            params.mods,params.NS);
+        params.smin = [roboparams.posmin roboparams.thmin roboparams.eyemin];
+        params.smax = [roboparams.posmax roboparams.thmax roboparams.eyemax];
+        params.roboparams = roboparams;
+        
+        params.typeUnits = {{'Poisson'}, {'Bernoulli'}};
+        % params.typeUnits = {{'Bernoulli'},{'BernoulliDropout'}};
+        Nmods = length(params.mods);
+        if strcmp(params.typeUnits{2},'BernoulliDropout')
+            params.gmin = [0.024 0.072 0.024];
+            params.gmax = [0.036 0.108 0.036];
+            params.N = 600;
+            Nvis = Nmods*params.N^params.Ndims;
+            params.numsUnits = {Nvis, 1200};
+            params.NepochsMax = 25;
+            params = setLearningSchedules(1,0.25,0.25,'exp',params);
+            params.kw = 1e-7;                 % because of dropout!
+            params.kvb = 1e-7;                %   but see choice for
+            params.khb = 1e-7;                %   '1Dinteg' below
+        else
+            params.gmin = [4 12 4];
+            params.gmax = [6 18 6];
+            params.N = 60;                    % number of neurons *** (2) ***
+            Nvis = Nmods*params.N^params.Ndims;
+            params.numsUnits = {Nvis, 160};
+            params = setLearningSchedules(250,60,60,'exp',params);
+        end
+        
+        % get the "grid parameters"
+        [params.C,params.respLength,params.margin,params.gridsize,...
+            params.granularity] = getGridParams(params.Ndims,params.N,...
+            params.walls);
+        
+        % functions
+        params.getLatents = @(Nexamples,yrclass)(...
+            getLatentsMultisensoryIntegration(Nexamples,yrclass,...
+            params.NS,params));
+        params.getData = @(X,Q)(getDataPPC(X,Q,params));
+        params.testEFH = @(R,X,Q,wts)(testEFHPPC(R,X,Q,wts,params));
+        Ntestdata = 40000;
+        params.getTestData = @(yrclass)(generateData(...
+            Ntestdata,params.getLatents,params.getData,yrclass));
+        
+        
+        
+    case '1Daddition_2Layer'
+        params.algorithm = defaulter('algorithm','EFH',varargin{:});
         
         % modality names
         params.mods{1} = 'Hand-Position';
         params.mods{2} = 'Joint-Angle';
+        params.mods{3} = 'Gaze-Angle';
+        
+        % data generation
+        params.Ndims = 1;                   % encoded vars/neuron
+        params.NS = 'Hand-Position';        % "neutral space"
+        params.walls = 'clipping';
+        
+        % arm properties
+        thmin = pi/6;
+        thmax = 5*pi/6;
+        armlengths = 12;
+        roboparams = getLimits(thmin,thmax,armlengths,params.Ndims,...
+            params.mods,params.NS);
+        params.smin = [roboparams.posmin roboparams.thmin roboparams.eyemin];
+        params.smax = [roboparams.posmax roboparams.thmax roboparams.eyemax];
+        params.roboparams = roboparams;
+        
+        params.typeUnits = {{'Poisson'}, {'Bernoulli'}, {'Bernoulli'}};
+        Nmods = length(params.mods);
+        params.gmin = [4 12 4];
+        params.gmax = [6 18 6];
+        params.N = 60;                    % number of neurons *** (2) ***
+        Nvis = Nmods*params.N^params.Ndims;
+        params.numsUnits = {Nvis, 160, 160};
+        params = setLearningSchedules(250,60,60,'exp',params);
+        
+        
+        % get the "grid parameters"
+        [params.C,params.respLength,params.margin,params.gridsize,...
+            params.granularity] = getGridParams(params.Ndims,params.N,...
+            params.walls);
+        
+        % functions
+        params.getLatents = @(Nexamples,yrclass)(...
+            getLatentsMultisensoryIntegration(Nexamples,yrclass,...
+            params.NS,params));
+        params.getData = @(X,Q)(getDataPPC(X,Q,params));
+        params.testEFH = @(R,X,Q,wts)(testEFHPPC(R,X,Q,wts,params));
+        Ntestdata = 40000;
+        params.getTestData = @(yrclass)(generateData(...
+            Ntestdata,params.getLatents,params.getData,yrclass));
+        
+        
+    case '1Dinteg'
+        params.algorithm = defaulter('algorithm','EFH',varargin{:});
+        
+        % modality names
+        params.mods{1} = 'Hand-Position';
+        params.mods{2} = 'Joint-Angle';
+        params.Ndims = 1;                   % encoded vars/neuron
+        params.NS = 'Joint-Angle';
+        params.walls = 'clipping';
+        
+        % arm properties
+        thmin = pi/6;
+        thmax = 5*pi/6;
+        armlengths = 12;
+        roboparams = getLimits(thmin,thmax,armlengths,params.Ndims,...
+            params.mods,params.NS);
+        params.smin = [roboparams.posmin roboparams.thmin];
+        params.smax = [roboparams.posmax roboparams.thmax];
+        params.roboparams = roboparams;
+        
         
         % RBM units
-        params.typeUnits = {'Poisson','Bernoulli'};
-        % params.typeUnits = {'Bernoulli','BernoulliDropout'};
+        params.typeUnits = {{'Poisson'},{'Bernoulli'}};
+        Nmods = length(params.mods);
+        %%%params.typeUnits = {{'Bernoulli'},{'BernoulliDropout'}};
         if strcmp(params.typeUnits{2},'BernoulliDropout')
+            params.gmin = [0.064, 0.064];
+            params.gmax = [0.096, 0.096];
             params.N = 600;
-            params.g = 0.08;
-            % params.mw = 5;
-            % params.mvb = 1.2;
-            % params.mhb = 1.2;
-            % params.k = 1e-4;
-            params.mw = 1;
-            params.mvb = 0.25;
-            params.mhb = 0.25;
-            params.b = params.mw/2;     % => k < 0.3125 for no oscillations
-            params.k = 1e-7;            % because of dropout!            
-            params.DBNmaxepoch = 25;
+            Nvis = Nmods*params.N^params.Ndims;
+            params.numsUnits = {Nvis, Nvis/2};
+            params.NepochsMax = 25;
+            params = setLearningSchedules(1,0.25,0.25,'exp',params);
+            %%% => k < 0.3125 for no osc
+            params.kw = 1e-7;
+            params.kvb = 1e-7;
+            params.khb = 1e-7;
+        else
+            params.gmin = [12, 12];
+            params.gmax = [18, 18];
+            params.N = 60;
+            Nvis = Nmods*params.N^params.Ndims;
+            params.numsUnits = {Nvis, Nvis}; % Nvis/2};
+            params.NepochsMax = 90;
+            params = setLearningSchedules(500,120,120,'exp',params);
         end
-            
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis, Nvis/2];
+        
+        % get the "grid parameters"
+        [params.C,params.respLength,params.margin,params.gridsize,...
+            params.granularity] = getGridParams(params.Ndims,params.N,...
+            params.walls);
+        
+        % set the data generation functions
+        params.getLatents = @(Nexamples,yrclass)(...
+            getLatentsMultisensoryIntegration(Nexamples,yrclass,...
+            params.NS,params));
+        params.getData = @(X,Q)(getDataPPC(X,Q,params));
+        params.testEFH = @(R,X,Q,wts)(testEFHPPC(R,X,Q,wts,params));
+        Ntestdata = 40000;
+        params.getTestData = @(yrclass)(generateData(...
+            Ntestdata,params.getLatents,params.getData,yrclass));
+        
+        
         
         
     case '2Daddition'
-        
-        % data generation
-        params.Ndims = 2;                   % encoded vars/neuron
-        params.Nmods = 3;                   % number of modalities
-        params.N = 30;                      % number of neurons *** (2) ***
-        params.g = 15;                      % gain
-        params.swing = 0.2;                 % swing in gain (max=1)
-        params.NS = 'Hand-Position';        % "neutral space"
-        
-        % arm properties
-        params.thmin = [-pi/2; pi/4];   % [-pi/4; 0];
-        params.thmax = [pi/4; 3*pi/4];  % [pi/4; pi/2];
-        params.L1 = 12;                     % upper arm
-        params.L2 = 20;                     % forearm
-        params = getLimits(params);
-        params.smin = [params.posmin params.thmin params.eyemin];
-        params.smax = [params.posmax params.thmax params.eyemax];
+        params.algorithm = defaulter('algorithm','EFH',varargin{:});
         
         % modality names
         params.mods{1} = 'Hand-Position';
         params.mods{2} = 'Joint-Angle';
         params.mods{3} = 'Gaze-Angle';
         
-        % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis, Nvis];
-        params.typeUnits = {'Poisson','Bernoulli'};
-        
-        
-        
-    case '2DrEFH'
-        
         % data generation
         params.Ndims = 2;                   % encoded vars/neuron
-        params.Nmods = 1;                   % number of modalities
-        params.N = 15;                      % number of neurons *** (2) ***
-        params.g = 8;                       % gain
-        params.swing = 0.2;                 % swing in gain (max=1)
-        params.NS = 'Joint-Angle';
+        params.N = 30;                      % number of neurons *** (2) ***
+        params.gmin = [12 12 12];
+        params.gmax = [18 18 18];
+        params.NS = 'Joint-Angle';          % "neutral space"
+        params.walls = 'clipping';
         
         % arm properties
-        params.thmin = [-3*pi/8; -pi/4]; % [-pi/2; pi/4]; % shoulder, elbow
-        params.thmax = [+3*pi/8; +pi/4]; % [pi/4; 3*pi/4];% shoulder, elbow
-        params.L1 = 12;                     % upper arm
-        params.L2 = 20;                     % forearm
-        params.smin = params.thmin;
-        params.smax = params.thmax;
+        thmin = [-pi/2; pi/4];              % [-pi/4; 0];
+        thmax = [pi/4; 3*pi/4];             % [pi/4; pi/2];
+        armlengths = [12; 20];
+        roboparams = getLimits(thmin,thmax,armlengths,params.Ndims,...
+            params.mods,params.NS);
+        params.smin = [roboparams.posmin roboparams.thmin roboparams.eyemin];
+        params.smax = [roboparams.posmax roboparams.thmax roboparams.eyemax];
+        params.roboparams = roboparams;
         
-        % modality names
-        params.mods = {'Joint-Angle'};
-        
-        % dynamical params
-        params.dynamics = setDynamics(params);
+        % get the "grid parameters"
+        [params.C,params.respLength,params.margin,params.gridsize,...
+            params.granularity] = getGridParams(params.Ndims,params.N,...
+            params.walls);
         
         % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis + 5*Nvis, 5*Nvis];
-        params.typeUnits = {'BP','Bernoulli'};
-        params.t = params.numsUnits(2);
-        
-        % change the way the learning mass is increased
-        params.massUpdate =...
-            @(mass0,iEp)(1000/(1 + exp(-iEp/8 + 7.5)) + 0.5)*mass0;
-        params.DBNmaxepoch = 1200;
-        fprintf('Using the SIGMOIDAL learning-rate adjustment scheme!!\n');
-      
+        Nmods = length(params.mods);
+        Nvis = Nmods*params.N^params.Ndims;
+        params.numsUnits = {Nvis, Nvis};
+        params.typeUnits = {{'Poisson'},{'Bernoulli'}};
         
         
-    case '2DrEFHwithEC'
+        % learning schedules
+        params = setLearningSchedules(500,120,120,'exp',params);
         
-        % data generation
-        params.Ndims = 2;                   % encoded vars/neuron
-        params.Nmods = 2;                   % number of modalities
-        params.N = 15;                      % number of neurons *** (2) ***
-        params.g = 8;                       % gain
-        params.swing = 0.2;                 % swing in gain (max=1)
-        params.NS = 'Joint-Angle';
-        
-        % arm properties
-        params.thmin = [-3*pi/8; -pi/4]; % [-pi/2; pi/4];       % shoulder, elbow
-        params.thmax = [+3*pi/8; +pi/4]; % [pi/4; 3*pi/4];      % shoulder, elbow
-        params.L1 = 12;                     % upper arm
-        params.L2 = 20;                     % forearm
-        
-        % EC properties
-        params.ctrlmin = -[1.25; 1.25];
-        params.ctrlmax =  [1.25; 1.25];
-        params.smin = [params.thmin, params.ctrlmin];
-        params.smax = [params.thmax, params.ctrlmax];
-        
-        % modality names
-        params.mods = {'Joint-Angle','Efference-Copy'};
-        
-        % dynamical params
-        params.dynamics = setDynamics(params);
-        
-        % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis + 5*Nvis, 5*Nvis];
-        params.typeUnits = {'BP','Bernoulli'};
-        params.t = params.numsUnits(2);
-        
-        % change the way the learning mass is increased
-        params.massUpdate =...
-            @(mass0,iEp)(1000/(1 + exp(-iEp/8 + 7.5)) + 0.5)*mass0;
-        params.DBNmaxepoch = 1200;
-        fprintf('Using the SIGMOIDAL learning-rate adjustment scheme!!\n');
+        % functions
+        params.getLatents = @(Nexamples,yrclass)(...
+            getLatentsMultisensoryIntegration(Nexamples,yrclass,...
+            params.NS,params));
+        params.getData = @(X,Q)(getDataPPC(X,Q,params));
+        params.testEFH = @(R,X,Q,wts)(testEFHPPC(R,X,Q,wts,params));
+        Ntestdata = 40000;
+        params.getTestData = @(yrclass)(generateData(...
+            Ntestdata,params.getLatents,params.getData,yrclass));
         
         
         
-    case '1DrEFH'
         
-        SPRING = 0;
+    case 'HierL2'
+        params.algorithm = defaulter('algorithm','EFH',varargin{:});
         
-        % data generation
-        params.Ndims = 1;                   % encoded vars/neuron
-        params.Nmods = 1;                   % number of modalities
-        %%%
-        params.Nmods = 2;                   % number of modalities
-        %%%
-        params.N = 15;                      % number of neurons *** (2) ***
-        params.g = 8;                       % gain
-        params.swing = 0.2;                 % swing in gain (max=1)
-        params.NS = 'Joint-Angle';
+        % load a saved model
+        fileprefix = 'wts_2Dinteg_900';
+        % oldvars = load(sprintf('%sRBMish/EFHs/%s_31-Dec-2016.mat',...
+        %     getdir('data'),fileprefix),'wts','params');
+        oldvars = load(sprintf('%sRBMish/EFHs/new/%s.mat',...
+            getdir('data'),fileprefix),'wts','params');
+        oldvars.params.smpls = 15; % to generate hidden-layer activities
+        oldvars.params.machine = params.machine;
         
-        % arm properties
-        params.thmin = -pi/3;
-        params.thmax = +pi/3;
-        params.L1 = 12;
-        params.smin = params.thmin;
-        params.smax = params.thmax;
-        params.mods = {'Joint-Angle'};
-        
-        if params.Nmods == 2
-            
-            % velocity properties
-            if SPRING
-                params.wmin = -0.8;
-                params.wmax = +0.8;
-            else
-                params.wmin = -1.9;
-                params.wmax = +1.9;
-            end
-            params.smin(:,2) = params.wmin;
-            params.smax(:,2) = params.wmax;
-            
-            % modality names
-            params.mods{2} = 'Angular-Velocity';            
+        % new (upper) EFH: *mostly* the same as the lower EFH
+        reusedparams = {'Ts','Ndims','N','walls',...
+            'C','respLength','margin','gridsize','granularity',...
+            'Ncases','Nbatches','NepochsMax','Ncdsteps'};
+        for fn = reusedparams
+            params.(fn{1}) = oldvars.params.(fn{1});
         end
         
-        % dynamical params
-        params.dynamics = setDynamics(params);
+        % stimulus parameters (one modality)
+        params.NS = 'Joint-Angle';      % say, the *left* arm
+        params.mods = {'Joint-Angle'};
+        modInds = strcmp(oldvars.params.mods,params.mods);
+        params.smin = oldvars.params.smin(:,modInds);
+        params.smax = oldvars.params.smax(:,modInds);
+        params.gmin = oldvars.params.gmin(:,modInds);
+        params.gmax = oldvars.params.gmax(:,modInds);
+        
+        % EFH parameters (two typesUnits{1})
+        params.typeUnits = {{'Bernoulli','Poisson'},{'Bernoulli'}};
+        Nhid0 = sum(oldvars.params.numsUnits{end});
+        params.numsUnits = {[Nhid0, Nhid0], Nhid0};
+        params.mw  = @(iii)([oldvars.params.mw(iii)/10,oldvars.params.mw(iii)]);
+        params.mvb = @(iii)([oldvars.params.mvb(iii)/10,oldvars.params.mvb(iii)]);
+        params.mhb = @(iii)(oldvars.params.mhb(iii));
+        params.bw  = @(iii)([oldvars.params.bw(iii)/10,oldvars.params.bw(iii)]);
+        params.bvb = @(iii)([oldvars.params.bvb(iii)/10,oldvars.params.bvb(iii)]);
+        params.bhb = @(iii)(oldvars.params.bhb(iii));
+        params.kw  = @(iii)([oldvars.params.kw(iii)/10,oldvars.params.kw(iii)]);
+        params.kvb = @(iii)([oldvars.params.kvb(iii)/10,oldvars.params.kvb(iii)]);
+        params.khb = @(iii)(oldvars.params.khb(iii));
+        
+        % functions
+        params.getLatents = @(Nexamples,yrclass)(...
+            getLatentsMultisensoryIntegration(Nexamples,yrclass,...
+            oldvars.params.NS,oldvars.params));
+        params.getData = @(S,Q)(getDataHierL2(S,Q,oldvars.wts,...
+            oldvars.params,params));
+        params.testEFH = @(R,S,Q,wts)(testEFHPPC(R,S,Q,wts,params));
+        Ntestdata = 40000;
+        params.getTestData = @(yrclass)(generateData(...
+            Ntestdata,params.getLatents,params.getData,yrclass));
         
         
-        % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis + 10*Nvis, 10*Nvis];
-        %%% params.numsUnits = [Nvis + 225, 225];
-        params.typeUnits = {'BP','Bernoulli'};
         
+        
+    case 'LTI-PPC'
+        
+        % which learning algorithm?
+        params.algorithm = defaulter('algorithm','rEFH',varargin{:});
+        %%% params.algorithm = defaulter('algorithm','TRBM',varargin{:});
+        %%% params.algorithm = defaulter('algorithm','RTRBM',varargin{:});
+        
+        % include a spring force?
+        SPRING = defaulter('SPRING',1,varargin{:});
+        
+        % which set of modalities?
+        params.mods = defaulter('mods',{'Joint-Angle'},varargin{:});
+        % params.mods = defaulter('mods',{'Joint-Angle','Angular-Velocity'},varargin{:});
+        % params.mods = defaulter('mods',{'Joint-Angle','Efference-Copy'},varargin{:});
+        % params.mods = defaulter('mods', {'Joint-Angle','Angular-Velocity','Efference-Copy'},varargin{:});
+        
+        % how many dimensions of positions?
+        Ndims = defaulter('Ndims',1,varargin{:});
+        
+        % data parameters
+        params.Ndims = Ndims;               % encoded vars/neuron
+        params.walls = 'wrapping';
+        
+        % state properties
+        zmax = [pi/3 0.8]; % second-order
+        if any(strcmp(params.mods,'Efference-Copy')), zmax = [zmax 1.25]; end
+        if ~SPRING, zmax(2) = 1.9; end
+        zmax = repmat(zmax,[Ndims,1]); zmax = zmax(:);
+        zmin = -zmax;
+        params.dynamics = setDynamics(Ndims,params.mods,zmin(1),zmax(1));
+        dt = params.dynamics.dt;
+        Nmods = length(params.mods);
+        params.smin = reshape(params.dynamics.C*zmin,[Ndims,Nmods]);
+        params.smax = reshape(params.dynamics.C*zmax,[Ndims,Nmods]);
+        
+        % data generation
+        switch SensoryUnitType              % gain, swin in gain
+            case 'Poisson'
+                params.N = 15;
+                params.gmin = 6.4*ones(size(params.mods));
+                params.gmax = 9.6*ones(size(params.mods));
+                Nvis = Nmods*params.N^params.Ndims;
+                switch Ndims
+                    case 1, Nhid = 16*Nvis; % 19*Nvis;
+                    case {2,3}, Nhid = 5*Nvis;
+                end
+            case 'Bernoulli'
+                params.N = 15;
+                params.gmin = 0.08*ones(size(params.mods));
+                params.gmax = 0.08*ones(size(params.mods));
+                Nwindows = 100;
+                dt = dt/Nwindows; m = 5; b = 0.25; k = 3;
+                params.dynamics.dt = dt;
+                params.dynamics.A =...
+                    [eye(Ndims)         dt*eye(Ndims);...
+                    -k/m*dt*eye(Ndims)  -(b/m*dt-1)*eye(Ndims)];
+                Nvis = Nmods*params.N^params.Ndims;
+                Nhid = 4*Nvis;
+            case 'StandardNormal'
+                params.N = 1;
+                sigmaSqY = 0.0012;
+                params.gmin = 1/(sqrt(sigmaSqY))*ones(size(params.mods));
+                params.gmax = 1/(sqrt(sigmaSqY))*ones(size(params.mods));
+                params.dynamics.SigmaYX = sigmaSqY*eye(Nmods);
+                params.walls = 'none'; %%% ??
+                Nvis = Nmods*params.N^params.Ndims;
+                switch Ndims
+                    case 1, Nhid = 15*Nvis;
+                    case {2,3}, Nhid = 5*Nvis;
+                end
+        end
+        params.NS = 'Joint-Angle';
+        
+        % the "NoSpring" case
+        % the "NoSpring" case
         if ~SPRING
             % to make the NoSpring case:
             k=0; b=0.25; m=5; dt=0.05;
-            params.dynamics.A = [1.0000, dt; -k/m*dt, -(b/m*dt-1)];
+            A = [eye(Ndims)             dt*eye(Ndims);...
+                -k/m*dt*eye(Ndims)      -(b/m*dt-1)*eye(Ndims)];
+            params.dynamics.A = A;
             params.dynamics.SigmaX = params.dynamics.SigmaX*50;
-            params.numsUnits = [Nvis + 15*Nvis, 15*Nvis];
+            params.dynamics.m = m;
+            if strcmp(SensoryUnitType,'Bernoulli')
+                Nhid = 1*Nvis;
+            else
+                Nhid = 15*Nvis;
+            end
         end
-    
-        % how many *Bernoulli* units in the input layer?
-        params.t = params.numsUnits(2);
         
-    case '1DrEFHwithEC'
+        % RBM units, cont
+        params.numsUnits = {Nvis, Nhid};
+        params.typeUnits = {{SensoryUnitType},{'Bernoulli'}};
         
-        % data generation
-        params.Ndims = 1;                   % encoded vars/neuron
-        params.Nmods = 2;                   % number of modalities
-        params.N = 15;                      % number of neurons *** (2) ***
-        params.g = 8;                       % gain
-        params.swing = 0.2;                 % swing in gain (max=1)
-        params.NS = 'Joint-Angle';
+        % delayed?
+        %%% params.delay = 2;
         
-        % arm properties
-        params.thmin = -pi/3;
-        params.thmax = +pi/3;
-        params.L1 = 12;
-        params.smin = params.thmin;
-        params.smax = params.thmax;
+        % use different learning rates for Bernoulli-Bernoulli wts
+        switch params.algorithm
+            case {'TRBM','RTRBM'}
+                % adjust learning parameters....
+                params.Ncases = 100;
+                params.Nbatches = 40000/params.Ncases;
+                params.EACHBATCHISATRAJ = 1;
+                params.Npretrain = 0; % s30;
+                params.NepochsMax = 255;
+                params.Ncdsteps = 25;
+                params = setLearningSchedules(1500,1500,1500,'hyperbolic',params,150,150);
+            case 'rEFH'
+                params.EACHBATCHISATRAJ = 0;
+                params.Npretrain = 0;
+                if strcmp(SensoryUnitType,'Bernoulli')
+                    % params = setLearningSchedules(50,12,12,'exp',params,1);
+                    params = setLearningSchedules(1,0.25,0.25,'exp',params,1,0.25);
+                    % %%% => k < 0.3125 for no osc
+                    % params.kw = 1e-7;               % because of dropout!
+                    % params.kvb = 1e-7;              %
+                    % params.khb = 1e-7;
+                    params.Ncases = 5;
+                    params.Nbatches = 40000/params.Ncases;
+                else
+                    switch Ndims
+                        case 1
+                            if any(strcmp(params.mods,'Efference-Copy')),
+                                params.NepochsMax = 255;
+                                %params = setLearningSchedules(800,200,200,'logistic',params,50,12);
+                                %params.NepochsMax = 90;
+                                params.EACHBATCHISATRAJ = 1;
+                                params.Ncases = 100;
+                                params.Nbatches = 40000/params.Ncases;
+                                params = setLearningSchedules(1500,1500,1500,'hyperbolic',params,150,150);
+                            else
+                                params.NepochsMax = 50;
+                                params = setLearningSchedules(...
+                                    800,200,200,'exp',params,50,12);
+                            end
+                        case {2,3}
+                            params.NepochsMax = 1200;
+                            params = setLearningSchedules(500,120,120,'logistic',params,50,12);
+                    end
+                end
+            otherwise
+                error('unknown training algorithm -- jgm');
+        end
         
-        % EC properties
-        params.ctrlmin = -1.25;
-        params.ctrlmax = 1.25;
-        %%% you can solve for these in closed form by computing the
-        %%% variance of a drift/diffusion process, -> 3*stddev
-        params.smin = [params.thmin, params.ctrlmin];
-        params.smax = [params.thmax, params.ctrlmax];
+        % get the "grid parameters"
+        [params.C,params.respLength,params.margin,params.gridsize,...
+            params.granularity] = getGridParams(params.Ndims,params.N,...
+            params.walls);
         
-        % modality names
-        params.mods = {'Joint-Angle','Efference-Copy'};
-        
-        % dynamical params
-        params.dynamics = setDynamics(params);
-        
-        % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis + 6*Nvis, 6*Nvis];
-        params.typeUnits = {'BP','Bernoulli'};
-        params.t = params.numsUnits(2);
-        
-        % learning rates
-        params.mw = 500;
-        params.mvb = 120;
-        params.mhb = 120;
-        params.b = params.mw/2;
-        
-        % change the way the learning mass is increased
-        params.massUpdate =...
-            @(mass0,iEp)(1000/(1 + exp(-iEp/8 + 7.5)) + 0.5)*mass0;
-        params.DBNmaxepoch = 1200;
-        fprintf('Using the SIGMOIDAL learning-rate adjustment scheme!!\n');
-        
-        
-        
-    case '3DrEFH'
-        
-        % data generation
-        params.Ndims = 3;                   % encoded vars/neuron
-        params.Nmods = 1;                   % number of modalities
-        params.N = 15;                      % number of neurons *** (2) ***
-        params.g = 10; % 6;                       % gain
-        params.swing = 0.2;                 % swing in gain (max=1)
-        params.NS = 'Joint-Angle';
-        
-        % arm properties
-        params.thmin = [0; 0; 0];
-        params.thmax = [2*pi; 2*pi; 2*pi];
-        params.smin = params.thmin;
-        params.smax = params.thmax;
-        
-        % modality names
-        params.mods = {'Joint-Angle'};
-        
-        % dynamical params
-        params.dynamics = setDynamics(params);
-        
-        % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis + 1*Nvis, 1*Nvis];
-        params.typeUnits = {'BP','Bernoulli'};
-        params.t = params.numsUnits(2);
-        
-        % change the way the learning mass is increased
-        params.massUpdate =...
-            @(mass0,iEp)(1000/(1 + exp(-iEp/8 + 7.5)) + 0.5)*mass0;
-        params.DBNmaxepoch = 1200;
-        fprintf('Using the SIGMOIDAL learning-rate adjustment scheme!!\n');
+        % functions
+        if params.EACHBATCHISATRAJ, T=params.Ncases; else T=params.Nbatches; end
+        params.getLatents = @(Nexamples,yrclass,varargin)(getLatentsLTI(...
+            Nexamples,T,yrclass,params.NS,params,varargin{:}));
+        params.getData = @(X,Q)(getDataPPC(X,Q,params));
+        params.testEFH = @(R,X,Q,wts)(testEFHPPC(R,X,Q,wts,params));
+        params.getTestData = @(yrclass)(dynamicalDataWrapper(40,1000,yrclass,params));
         
         
         
-    case 'Binomial' % or whatever
-        %%%%%%%%%%%%%%%%%
-        params.nexperiments = 200;          % for binomial neurons
-        %%%%%%%%%%%%%%%%%
-        % case
-        
-        %%%%%%%%%%%%%%%%%%%%%%%
-        % params.gains = [22 8 8];
-        % params.gains = [10 30 10];
-        % params.gains = [2 5 2];
-        %%%%%%%%%%%%%%%%%%%%%%%
         
     case 'MCDexperiment'
+        params.algorithm = defaulter('algorithm','EFH',varargin{:});
+        
+        % modality names
+        params.mods = {'Motion-Dots','ICMSpolar'};
         
         % just for this case
         dmin = 40;      % mm
@@ -521,8 +733,7 @@ switch params.MODEL
         params.experiment.Nelectrodes = Nelectrodes;
         params.experiment.PDs = PDs;
         
-        electrodeFunc = @(th,d)(...
-            Fmax/dmax*bsxfun(@times,d,(1+cos(bsxfun(@minus,th,PDs)))/2));
+        electrodeFunc = @(th,d)(Fmax/dmax*(d.*(1+cos(th-PDs)))/2);
         
         params.experiment.electrodeFunc = electrodeFunc;
         params.experiment.neuronsPerElectrode = 30;
@@ -530,28 +741,45 @@ switch params.MODEL
         
         % data generation
         params.Ndims = 2;                   % encoded vars/neuron
-        params.Nmods = 2;                   % number of modalities
         params.N = 15;                      % 24^2 = 8*72
-        params.g = 15;                      % gain
-        params.swing = 0;                   % swing in gain (max=1)
+        params.gmin = [15 15];
+        params.gmax = [15 15];
         params.NS = 'Motion-Dots';          % "neutral space"
         
         % arm properties
-        params.smin = [-dmax; -dmax];
-        params.smax = [dmax; dmax];
-        
-        % modality names
-        params.mods = {'Motion-Dots','ICMS'};
+        cartmin = -[dmax; dmax];
+        cartmax = +[dmax; dmax];
+        polarmin = [0; 40];
+        polarmax = [2*pi; 115];
+        params.smin = [cartmin, polarmin];
+        params.smax = [cartmax, polarmax];
         
         % RBM units
         Nvis = params.N^params.Ndims +...
             Nelectrodes*params.experiment.neuronsPerElectrode;
-        params.numsUnits = [Nvis, floor(Nvis/2)];
-        params.typeUnits = {'Poisson','Bernoulli'};
+        params.numsUnits = {Nvis, floor(Nvis/2)};
+        params.typeUnits = {{'Poisson'},{'Bernoulli'}};
+        
+        % learning schedules
+        params = setLearningSchedules(500,120,120,'exp',params);
+        
+        % functions
+        params.getLatents = @(Nexamples,yrclass)(getLatentsMCD(...
+            Nexamples,yrclass,params));
+        params.getData = @(S,Q)(getDataMCDexperiment(S,Q,params));
+        params.testEFH = @(R,S,Q,wts)(testEFHPPC(R,S,Q,wts,params));
+        Ntestdata = 40000;
+        params.getTestData = @(yrclass)(generateData(...
+            Ntestdata,params.getLatents,params.getData,yrclass));
+        
         
         
         
     case 'MCDdarpa'
+        params.algorithm = defaulter('algorithm','EFH',varargin{:});
+        
+        % modality names
+        params.mods = {'Motion-Dots','ICMS'};
         
         % distance min and max
         dmin = 40;      % mm
@@ -559,12 +787,10 @@ switch params.MODEL
         params.experiment.dmin = dmin;
         params.experiment.dmax = dmax;
         
-        
         % data generation
         params.Ndims = 2;                   % encoded vars/neuron
-        params.Nmods = 2;                   % number of modalities
         params.N = 15;                      % number of neurons *** (2) ***
-        params.g = 15;                      % gain
+        params.xpctGains = 15*ones(size(params.mods));
         params.swing = 1;                   % swing in gain (max=1)
         params.NS = 'Motion-Dots';
         
@@ -572,167 +798,55 @@ switch params.MODEL
         params.smin = [-dmax -dmax; -dmax -dmax];
         params.smax = [dmax dmax; dmax dmax];
         
-        % modality names
-        params.mods = {'Motion-Dots','ICMS'};
-        
         % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis, Nvis/2];
-        params.typeUnits = {'Poisson','Bernoulli'};
+        Nmods = length(params.mods);
+        Nvis = Nmods*params.N^params.Ndims;
+        params.numsUnits = {Nvis, Nvis/2};
+        params.typeUnits = {{'Poisson'},{'Bernoulli'}};
+        
+        % learning schedules
+        params = setLearningSchedules(500,120,120,'exp',params);
+        
+        % functions
+        params.getLatents = @(Nexamples,yrclass)(getLatentsMCD(...
+            Nexamples,yrclass,params));
+        params.getData = @(S,Q)(getDataPPC(S,Q,params));
+        params.testEFH = @(R,S,Q,wts)(testEFHPPC(R,S,Q,wts,params));
+        Ntestdata = 40000;
+        params.getTestData = @(yrclass)(generateData(...
+            Ntestdata,params.getLatents,params.getData,yrclass));
         
         
-        
-    case 'BMMdata'
-        path(path,'../SUNY');
-        
-        % data generation
-        params.Ndims = 2;                   % encoded vars/neuron
-        params.Nmods = 2;                   % number of modalities
-        params.N = 30;                      % number of neurons *** (2) ***
-        params.g = 15;                      % gain
-        params.swing = 0.2;                 % swing in gain (max=1)
-        params.NS = 'Joint-Angle';          % "neutral space"
-        
-        % modality names
-        params.mods{1} = 'Hand-Position';
-        params.mods{2} = 'Joint-Angle';
-        
-        % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis, Nvis/2];
-        params.typeUnits = {'Poisson','Bernoulli'};
-        
-     
-        
-    case '1DrEFHbern'
-        
-        % data generation
-        params.Ndims = 1;                   % encoded vars/neuron
-        params.Nmods = 1;                   % number of modalities
-        params.N = 600;                      % number of neurons *** (2) ***
-        params.g = 0.08;                    % gain
-        %%%params.swing = 0.2;                 % swing in gain (max=1)
-        params.swing = 0;
-        params.NS = 'Joint-Angle';
-        
-        % arm properties
-        params.thmin = -pi/3; % pi/6;    % 0;
-        params.thmax = +pi/3; % 5*pi/6;  % 2*pi;
-        params.L1 = 12;
-        params.smin = params.thmin;
-        params.smax = params.thmax;
-        
-        % modality names
-        params.mods = {'Joint-Angle'};
-        
-        % dynamical params
-        Nwindows = 100;
-        k=3; b=0.25; m=5; dt=0.05/Nwindows;
-        params.dynamics.A = [1.0000, dt; -k/m*dt, -(b/m*dt-1)];
-        params.dynamics.C = [1,0];
-        params.dynamics.SigmaX = [5e-7, 0; 0, 5e-5]/Nwindows;
-        params.dynamics.muX0 = 0;
-        params.dynamics.SigmaX0 = Inf;
-        params.dynamics.SigmaV0 = 5e-10;
-        params.dynamics.muV0 = 0;
-        params.dynamics.walls = 'wrapping';
-        
-        % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis + 1*Nvis, 1*Nvis];
-        params.typeUnits = {'Bernoulli','Bernoulli'};
-        params.t = params.numsUnits(2);
-        
-        
-    case '1DrEFHwithECdelayed'
-        
-        % data generation
-        params.Ndims = 1;                   % encoded vars/neuron
-        params.Nmods = 3;                   % number of modalities
-        params.N = 15;                      % number of neurons *** (2) ***
-        params.g = 8;                       % gain
-        params.swing = 0.2;                 % swing in gain (max=1)
-        params.NS = 'Joint-Angle';
-        
-        % arm properties
-        params.thmin = -pi/3; % pi/6;
-        params.thmax = +pi/3; % 5*pi/6;
-        params.L1 = 12;
-        params.smin = params.thmin;
-        params.smax = params.thmax;
-        
-        % velocity properties
-        params.wmin = -3.5; %%% computed empirically as 3*sqrt(var(w(:)))
-        params.wmax = +3.5;
-        
-        % EC properties
-        params.ctrlmin = -1.25;
-        params.ctrlmax = 1.25;
-        %%% you can solve for these in closed form by computing the
-        %%% variance of a drift/diffusion process, -> 3*stddev
-        params.smin = [params.thmin, params.wmin, params.ctrlmin];
-        params.smax = [params.thmax, params.wmax, params.ctrlmax];
-        
-        % modality names
-        params.mods = {'Joint-Angle','Angular-Velocity','Efference-Copy'};
-        
-        % dynamical params
-        params.dynamics = setDynamics(params);
-        params.dynamics.A(2,1) = 0;
-        %%%%%%% keep?
-        
-        %%%%%%
-%         params.mods = params.mods(1:2);
-%         params.smin = params.smin(:,1:2);
-%         params.smax = params.smax(:,1:2);
-%         params.dynamics = rmfield(params.dynamics,'H');
-        %%%%%%
-        
-        
-        
-        % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis + 5*Nvis, 5*Nvis];
-        params.typeUnits = {'BP','Bernoulli'};
-        params.t = params.numsUnits(2);
-        
-        % learning rates
-        params.mw = 500;
-        params.mvb = 120;
-        params.mhb = 120;
-        params.b = params.mw/2;
-        
-        % change the way the learning mass is increased
-        params.massUpdate =...
-            @(mass0,iEp)(1000/(1 + exp(-iEp/8 + 7.5)) + 0.5)*mass0;
-        params.DBNmaxepoch = 1200;
-        fprintf('Using the SIGMOIDAL learning-rate adjustment scheme!!\n');
         
         
     case 'HHSreachData'
+        %%%%%
+        % FIX ME
+        %%%%%
+        
+        
+        params.algorithm = defaulter('algorithm','rEFH',varargin{:});
+        
+        % modality names
+        params.mods = {'Hand-Position','Hand-Velocity','Efference-Copy'};
         
         % data generation
         params.Ndims = 2;                   % encoded vars/neuron
-        params.Nmods = 3;                   % number of modalities
-        % params.N = 15;                      % number of neurons *** (2) ***
-        params.N = 19;
-        params.g = 8;                       % gain
-        params.swing = 0.2;                 % swing in gain (max=1)
+        params.N = 15;                      % number of neurons *** (2) ***
+        % params.N = 19;
+        params.gmin = [6.4 6.4 6.4];
+        params.gmax = [9.6 9.6 9.6];
         params.NS = 'Hand-Position';
         
         % you got these by looking!
-        params.xmin = [-55; -100];           % min(targets) - 10;
-        params.xmax = [105; 60];             % max(targets) + 10;
+        params.xmin = [-55; -100];          % min(targets) - 10;
+        params.xmax = [105; 60];            % max(targets) + 10;
         params.vmin = -[500; 500];
         params.vmax = [500; 500];
         params.ctrlmin = -[34700; 33200];
         params.ctrlmax =  [34700; 33200];
         params.smin = [params.xmin, params.vmin, params.ctrlmin];
         params.smax = [params.xmax, params.vmax, params.ctrlmax];
-        
-        % modality names
-        params.mods = {'Hand-Position','Hand-Velocity','Efference-Copy'};
-        
         
         % dynamical params (copied from getCenterOutReacher.m)
         Nstates = 4;
@@ -768,65 +882,480 @@ switch params.MODEL
         % with skipping them if you just fit the LDS with EM or fullyObs,
         % rather than using "the true params."
         %%%%%
-        params.dynamics.walls = 'other';
+        params.walls = 'none'; %%% needs to be set, but doesn't matter what
         
+        % RBM units
+        Nmods = length(params.mods);
+        Nvis = Nmods*params.N^params.Ndims;
+        Nhid = 320;
+        params.numsUnits = {Nvis, Nhid};
+        params.typeUnits = {{'Poisson'},{'Bernoulli'}};
+        
+        % learning parameters
+        params.Ncases = 200;
+        params.Nbatches = 40000/params.Ncases;
+        params.EACHBATCHISATRAJ = 1;
+        params.Npretrain = 30;
+        params.NepochsMax = 255;
+        params.Ncdsteps = 25;
+        params = setLearningSchedules(1500,750,750,'hyperbolic',params,150,75);
+        
+        % params.NepochsMax = 25000;
+        % logisticGrowth = @(x0,ii)(1000/(1 + exp(-ii/8 + 7.5)) + 0.5)*x0*Ts^2;
+        % mw0 = 500;
+        % params.mw = @(iEp)(logisticGrowth(mw0,iEp));
+        % params.mvb = @(iEp)(logisticGrowth(120,iEp));
+        % params.mhb = @(iEp)(logisticGrowth(120,iEp));
+        % fprintf('Using the SIGMOIDAL learning-rate adjustment scheme!!\n');
+        % params.b = @(iEp)(0.5*mw0*Ts);
+        
+        if params.EACHBATCHISATRAJ, T=params.Ncases; else T=params.Nbatches; end
+        params.getLatents = @(Nexamples,yrclass,varargin)(getLatentsHHS(...
+            Nexamples,T,yrclass,params.NS,params,varargin{:}));
+        params.getData = @(S,Q)(getDataPPC(S,Q,params));
+        params.testEFH = @(R,S,Q,wts)(testEFHPPC(R,S,Q,wts,params));
+        params.getTestData = @(yrclass)(dynamicalDataWrapper(40,1000,yrclass,params));
+        
+        
+        
+        
+    case 'bouncingballs'
+        params.algorithm = defaulter('algorithm','rEFH',varargin{:});
+        % params.algorithm = defaulter('algorithm','TRBM',varargin{:});
+        % params.algorithm = defaulter('algorithm','RTRBM',varargin{:});
+        % params.algorithm = defaulter('algorithm','EFH',varargin{:});
+        PAPER = '[Sutskever2013]';
+        
+        % data generation
+        params.Ndims = 2;                   % encoded vars/neuron
+        
+        switch PAPER
+            case '[Sutskever2013]'
+                params.N = 30;
+                Nhid = 400;
+                params.Ncases = 100;
+                params.Nbatches = 400;
+                params.NepochsMax = 255;
+            case '[Boulanger-Lewandowski2012]'
+                params.N = 15;
+                Nhid = 300;
+                params.Ncases = 100;
+                params.Nbatches = 400;
+                params.NepochsMax = 255;
+            case '[Mittelman2014]'
+                params.N = 30;
+                Nhid = 2500;
+                params.Ncases = 100;
+                params.Nbatches = 100;
+                params.NepochsMax = 1000;
+            otherwise
+                params.N = 30;
+                Nhid = 625;
+                params.Ncases = 100;
+                params.Nbatches = 400;
+                params.NepochsMax = 255;
+        end
+        
+        % arm properties
+        params.smin = [0;0];
+        params.smax = [params.N;params.N];
+        
+        % modality names
+        params.mods = {'balls'};
+        params.walls = 'bouncing';
+        %%% not actually used
+        
+        % RBM units
+        Nsensory = params.N^params.Ndims;
+        params.numsUnits = {Nsensory, Nhid};
+        params.typeUnits = {{'Bernoulli'},{'Bernoulli'}};
+        
+        % learning parameters
+        params.EACHBATCHISATRAJ = 1;
+        params.Npretrain = 30;
+        params.Ncdsteps = 25;
+        params = setLearningSchedules(50,50,50,'hyperbolic',params,50,50);
+        %params = setLearningSchedules(25,25,25,'hyperbolic',params,25,25);
+        
+        % balls
+        params.balls.N = 3;                             % IS: 3
+        params.balls.boundingbox = 10;                  % IS: 10
+        params.balls.r = 1.2*ones(1,params.balls.N);    % IS: 1.2
+        params.balls.speed = 0.5;                       % IS: 0.5
+        
+        if params.EACHBATCHISATRAJ, T=params.Ncases; else T=params.Nbatches; end
+        params.getLatents = @(Nexamples,yrclass,varargin)(getLatentsBouncingBalls(...
+            Nexamples,yrclass,T,params.balls,ones(1,params.balls.N),varargin{:}));
+        params.getData = @(X,Q)(getDataBouncingBalls(X,Q,params.balls,params.N));
+        params.testEFH = @(R,X,Q,wts)(testEFHNextFrameError(R,X,Q,wts,params));
+        params.getTestData = @(yrclass)(dynamicalDataWrapper(400,100,yrclass,params));
+        
+        
+        
+        
+    case 'ErlangMixtureToy'
+        params.algorithm = defaulter('algorithm','EFH',varargin{:});
         
         
         % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        Nberns = 320;
-        params.numsUnits = [Nberns + Nvis, Nberns];
-        params.typeUnits = {'BP','Bernoulli'};
-        params.t = Nberns;
+        Nsamples = 1; %180; % can be done with 8
+        Ncats = 4;
+        params.numsUnits = {Nsamples*2, Ncats-1};
+        params.typeUnits = {{'Erlang'},{'Categorical'}};
+        %%% Bernoulli also works fine
         
-        % learning rates
-        params.mw = 500;
-        params.mvb = 120;
-        params.mhb = 120;
-        params.b = params.mw/2;
+        % Erlang parameters
+        %         params.shapeparams = [1;16;7];          %   1   16	7
+        %         params.scaleparams = [0.05;0.01;0.03];  %   20  100 33
+        %         ps = [10;3;3];
+        %         params.mixingproportions = ps(1:end-1)/sum(ps); % [p1,...,p_{n-1}]
+        %
+        %         params.shapeparams = [2; 10];
+        %         params.scaleparams = [0.04; 0.035];
+        %         params.mixingproportions = 0.8;
+        %
+        %         params.shapeparams = [2.5; 5.5];
+        %         params.scaleparams = [0.027; 0.058];
+        %         params.mixingproportions = 0.73;
+        params.shapeparams = [2.5; 5.5];
+        params.scaleparams = [0.027; 0.054];
+        params.mixingproportions = 0.77;
         
-        % change the way the learning mass is increased
-        params.massUpdate =...
-            @(mass0,iEp)(1000/(1 + exp(-iEp/8 + 7.5)) + 0.5)*mass0;
-        params.DBNmaxepoch = 25000;
-        fprintf('Using the SIGMOIDAL learning-rate adjustment scheme!!\n');
+        % learning (hyper-)parameters
+        params.NepochsMax = 25;
+        params.Ncases = 50;
+        params.Nbatches = 40000/params.Ncases;
+        %%%% surely the varargin here shouldn't be the default, 1/10!??!
+        params = setLearningSchedules(8,8,10,'hyperbolic',params);
+        %params = setLearningSchedules(15,15,25,'hyperbolic',params);
+        %params = setLearningSchedules(60,60,100,'hyperbolic',params);
+        
+        %%% seems like: as the ratio of visibles to hiddens *increases*,
+        %%% you have to turn down the momentum accordingly....
+        
+        % functions
+        params.getLatents = @(Nexamples,yrclass)(getLatentsClasses(...
+            Nexamples,yrclass,params));
+        params.getData = @(X,Q)(getDataErlangMixture(X,Q,params));
+        params.testEFH = @(R,X,Q,wts)(testEFHErlangMixture(R,X,Q,wts,params));
+        Ntestdata = 40000;
+        params.getTestData = @(yrclass)(generateData(...
+            Ntestdata,params.getLatents,params.getData,yrclass));
         
         
         
-    case {'rEFH','TRBM','RTRBM'}
+        
+    case 'ECcoherences'
+        params.algorithm = defaulter('algorithm','EFH',varargin{:});
+        % params.algorithm = defaulter('algorithm','rEFH',varargin{:});
+                
+        % RBM units
+        Nsamples = 1; % 80; %%% 180*12/60 = 36 minutes
+        Ncats = 4;
+        %%%
+        
+        % units
+        params.numsUnits = {Nsamples*2, Ncats-1};
+        params.typeUnits = {{'Erlang'},{'Categorical'}};
+        %params.numsUnits = {Nsamples*2, log2(Ncats)};
+        %params.typeUnits = {{'Erlang'},{'Categorical'}};
+        %params.numsUnits = {Nsamples, log2(Ncats)};
+        %params.typeUnits = {{'GammaFixedScale'},{'Categorical'}};
+        %params.numsUnits = {Nsamples, log2(Ncats)};
+        %params.typeUnits = {'GammaFixedScale'},{'Bernoulli'}};
+        %params.numsUnits = {Nsamples*2, log2(Ncats)};
+        %params.typeUnits = {{'Erlang'},{'Bernoulli'}};
+        
+        % Erlang parameters
+        %params.shapeparams = [0;0];         % we don't know these!
+        %params.scaleparams = [0;0];         %
+        params.scaleparams = 0.05;
+        params.mixingproportions = 0.5;     %
+        
+        % data params
+        params.Nsperwinstep = 1;
+        params.Nsperwindow = 1;
+        params.subj         = defaulter('subject','EC108',varargin{:});
+        params.trainsuffix  = defaulter('trainsuffix','_8337e405',varargin{:});
+        
+        % learning (hyper-)parameters
+        if strcmp(params.algorithm,'EFH')
+            %%%% these learning rates are just made up....
+            params.NepochsMax = 40;
+            params.Ncases = 50;
+            params.Nbatches = 40000/params.Ncases;
+            params = setLearningSchedules(30,30,60,'hyperbolic',params,30,30);
+            params.getLatents = @(Nexamples,yrclass,varargin)(...
+                getLatentsCoherences(Nexamples,yrclass,params));
+        else
+            params.NepochsMax = 40;
+            params.Ncases = 50;
+            params.Nbatches = 40000/params.Ncases;
+            params.EACHBATCHISATRAJ = 0;
+            params.Npretrain = 0;
+            if params.EACHBATCHISATRAJ
+                T=params.Ncases;
+            else
+                T=params.Nbatches;
+            end
+            params = setLearningSchedules(30,30,60,'hyperbolic',params,30,30);
+            params.getLatents = @(Nexamples,yrclass,varargin)(...
+                getLatentsCoherences(Nexamples,yrclass,params,...
+                'sequencelength',T,varargin{:}));
+        end
+        params.getData = @(S,Q)(getDataCoherences(S,Q,params.typeUnits{1}(1)));
+        params.testEFH = @(R,X,Q,wts)(testEFHcoherences(R,X,Q,wts,params));
+        params.getTestData = @(yrclass)(dynamicalDataWrapper(160,250,yrclass,params));
+        Ntestdata = 40000;
+        params.getTestData = @(yrclass)(generateData(...
+            Ntestdata,params.getLatents,params.getData,yrclass));
+        
+        
+        
+        
+    case 'ECoG'
+        params.algorithm = defaulter('algorithm','rEFH',varargin{:});
         
         % data generation
         params.Ndims = 1;                   % encoded vars/neuron
-        params.Nmods = 1;                   % number of modalities
-        params.N = 15;                      % number of neurons *** (2) ***
-        params.g = 8;                       % gain
-        params.swing = 0.2;                 % swing in gain (max=1)
-        params.NS = 'Joint-Angle';
+        params.N = 20; %124;                     % number of neurons *** (2) ***
         
         % arm properties
-        params.thmin = -pi/3;
-        params.thmax = +pi/3;
-        params.L1 = 12;
-        params.smin = params.thmin;
-        params.smax = params.thmax;
+        params.smin = 0;
+        params.smax = params.N;
         
-        % modality names
-        params.mods = {'Joint-Angle'};
-
-        % dynamical params
-        params.dynamics = setDynamics(params);
         
         % RBM units
-        Nvis = params.Nmods*params.N^params.Ndims;
-        params.numsUnits = [Nvis + 10*Nvis, 10*Nvis];
-        params.typeUnits = {'BP','Bernoulli'};
-        params.t = params.numsUnits(2);
+        Nsensory = params.N^params.Ndims;
+        Nhid = 400;
+        params.numsUnits = {Nsensory, Nhid};
+        params.typeUnits = {{'StandardNormal'},{'Bernoulli'}};
         
-        % the number of trajectories to train on (but not at once!)
-        % params.Ncases = 203;
-        %%%
-        params.DBNmaxepoch = 120; 
-        %%%
+        % use different learning rates for Bernoulli-Bernoulli wts
+        params.EACHBATCHISATRAJ = 0;
+        params.Npretrain = 0;
+        params.NepochsMax = 40;
+        params.Ncdsteps = 25;
+        params.Ncases = 20;
+        params.Nbatches = 40000/params.Ncases;
+        params = setLearningSchedules(800,200,200,'exp',params,130,30);
+        %%% should the *hidden biases* (hb) be updated fast?
+        
+        % functions
+        if params.EACHBATCHISATRAJ, T=params.Ncases; else T=params.Nbatches; end
+        params.getLatents = @(Nexamples,yrclass,varargin)(...
+            getLatentsNull(Nexamples,yrclass,T,varargin{:}));
+        params.getData = @(S,Q)(getDataECoG(S,Q,params.machine));
+        params.testEFH = @(R,X,Q,wts)(testEFHNextFrameError(R,X,Q,wts,params));
+        params.getTestData = @(yrclass)(dynamicalDataWrapper(40,1000,yrclass,params));
+        
+        
+        
+        
+    case 'spikecounts'
+        params.algorithm = defaulter('algorithm','rEFH',varargin{:});
+        datafile = defaulter('datafile',...
+            'Indy_datafiles/spikes_and_kinematics_20160407_02.mat',...
+            varargin{:});
+        params.datafile = datafile;
+        params.mods = defaulter('mods',{'M1S1'},varargin{:});
+        params.Nmsperbin = defaulter('Nmsperbin',64,varargin{:});
+        params.trainingtime = defaulter('trainingtime',320,varargin{:});
+        % 320 seconds; also can choose 'half'.
+        params.fraction = defaulter('fraction',1,varargin{:});
+        
+        if any(strcmp(datafile(1:4),{'Indy','Loco','Jack'}))
+            params.Fs = 250;
+        elseif strcmp(datafile(1:6),'Chewie')
+            params.Fs = 1000;
+        else
+            error('unexpected BMI data file -- jgm');
+        end
+
+        
+        % dynamical params
+        params.typeUnits = {{SensoryUnitType},{'Bernoulli'}};
+        
+        % RBM units
+        [~,Q] = getLatentsBMI([],'double',[],'train',params,...
+            'sequencelength','singlesequence');
+        [NsamplesTrain,Nsensory] = size(Q.R);
+        Nhid = Nsensory*4;
+        params.numsUnits = {Nsensory, Nhid};
+        
+        % batch division
+        params.EACHBATCHISATRAJ = any(strcmp(params.algorithm,{'RTRBM','TRBM'}));
+        params.Npretrain = 0;
+        params.NepochsMax = max(floor(NsamplesTrain/250),20);
+
+        % make sure trajs are long enough 
+        Ntrainingsamples = params.trainingtime/(params.Nmsperbin/1000);
+        if params.EACHBATCHISATRAJ
+            params.Ncases = min(40,Ntrainingsamples);
+            params.Nbatches = floor(40000/params.Ncases);
+        else
+            params.Nbatches = min(1000,Ntrainingsamples);
+            params.Ncases = floor(40000/params.Nbatches);
+        end
+        
+        % sparsity? (0.20,0.95,0.05)
+        sparse.cost = 0.20;
+        sparse.phidNewFrac = 0.95;
+        sparse.phidTarget = 0.05;
+        params.sparse = sparse;
+        
+        % learning rates
+        muR = mean(Q.R(:));
+        muZ = 0.09;             % \approx, because phidTarget = 0.05;
+        if strcmp(params.typeUnits{1},'StandardNormal')
+            mw0 = 200;
+        else
+            mw0 = mean([muR*Nsensory,muZ*Nhid])*10000/NsamplesTrain;
+        end
+        mr0 = 110;
+        wt2bias = 0.55;         %
+        params = setLearningSchedules(mw0,mw0*wt2bias,mw0*wt2bias,'exp',...
+            params,mr0,mr0*wt2bias);
+        
+        % functions
+        if params.EACHBATCHISATRAJ, T = params.Ncases; else T = params.Nbatches; end
+        params.getLatents = @(Nexamples,yrclass,varargin)(getLatentsBMI(...
+            Nexamples,yrclass,T,'train',params,varargin{:}));
+        params.getData = @(X,Q)(deal(Q.R, rmfield(Q,'R')));
+        params.testEFH = @(R,X,Q,wts)(testEFHBMI(R,X,Q,wts,params));
+        params.getTestData = @(yrclass)(dynamicalDataWrapper(...
+            1,'singlesequence',yrclass,setfield(params,'getLatents',...
+            @(Nexamples,yrclass,varargin)(getLatentsBMI(...
+            [],yrclass,[],'test',params,varargin{:})))));
+        
+        
+    case 'MoCap'
+        params.algorithm = defaulter('algorithm','rEFH',varargin{:});
+        
+        % training parameter        
+        params.EACHBATCHISATRAJ = 0;
+        params.Npretrain = 0;
+        Nsensory = 49; % params.N^params.Ndims;
+        
+        %{
+        Nhid = 80;
+        params.NepochsMax = 80;
+        params.Nbatches = 100;                  % => sequence length=100
+        params.Ncases = 40000/params.Nbatches;
+        params.numsUnits = {Nsensory, Nhid};
+        params = setLearningSchedules(100,50,50,'exp',params,16,8);
+        %}
+        
+        %%{
+            Nhid = 200;
+            params.NepochsMax = 150;
+            params.Nbatches = 100;                  % => sequence length=100
+            params.Ncases = 40000/params.Nbatches;
+            params.numsUnits = {Nsensory, Nhid};
+            params = setLearningSchedules(100,50,50,'exp',params,16,8);
+        %%}
+        
+        params.typeUnits = {{'StandardNormal'},{'Bernoulli'}};
+        path(path,genpath('C:\#code\MHMUBLV'));
+        
+        % functions
+        if params.EACHBATCHISATRAJ, T = params.Ncases; else T = params.Nbatches; end
+        params.getLatents = @(Nexamples,yrclass,varargin)(...
+            getLatentsNull(Nexamples,yrclass,T,varargin{:}));
+        params.getData = @(S,Q)(getDataMoCap(S,Q,'train'));
+        params.testEFH = @(R,X,Q,wts)(testEFHNextFrameError(R,X,Q,wts,params));
+        params.getTestData = @(yrclass)(dynamicalDataWrapper(800,50,yrclass,...
+            setfield(params,'getData',@(S,Q)(getDataMoCap(S,Q,'test')))));
+        
+        
+        
+    case 'polyphonicmusic'
+        params.algorithm = defaulter('algorithm','rEFH',varargin{:});
+        
+        % modality names
+        params.mods = {'none'};
+        
+        
+        % RBM units
+        Nsensory = 88;
+        Nhid = 120;  %%% first guess
+        % Nhid = 400;
+        params.numsUnits = {Nsensory, Nhid};
+        params.typeUnits = {{'Bernoulli'},{'Bernoulli'}};
+        
+        % use different learning rates for Bernoulli-Bernoulli wts
+        params.Ncases = 100;
+        params.Nbatches = 400;
+        params.EACHBATCHISATRAJ = 0;
+        params.Npretrain = 0;
+        params.NepochsMax = 80;
+        params = setLearningSchedules(100,50,50,'exp',params,100,50);
+        % params = setLearningSchedules(800,200,200,'exp',params,800,200);
+        
+        % which set of music
+        % params.database = 'Nottingham';
+        params.database = 'JSB Chorales';
+        % params.database = 'MuseData';
+        % params.database = 'Piano-midi';
+        
+        % functions
+        if params.EACHBATCHISATRAJ, T = params.Ncases; else T = params.Nbatches; end
+        params.getLatents = @(Nexamples,yrclass,varargin)(...
+            getLatentsNull(Nexamples,yrclass,T,varargin{:}));
+        params.getData = @(S,Q)(getDataPolyphonicMusic(S,Q,...
+            params.database,'train'));
+        params.testEFH = @(R,X,Q,wts)(testEFHNextFrameError(R,X,Q,wts,params));
+        params.getTestData = @(yrclass)(dynamicalDataWrapper(800,50,yrclass,...
+            setfield(params,'getData',@(S,Q)(getDataPolyphonicMusic(S,Q,...
+            params.database,'test')))));
+        
+        
+        
+        
+    case 'HDFRE'
+        params.algorithm = defaulter('algorithm','rEFH',varargin{:});
+        
+        SensoryUnitType = 'Categorical';
+        % SensoryUnitType = 'Bernoulli';
+        Nchars = 81;
+        switch SensoryUnitType
+            case 'Categorical'
+                Nsensory = Nchars-1;
+            case 'Bernoulli'
+                Nsensory = ceil(log2(Nchars));
+            otherwise
+                error('unexpected type of units for %s -- jgm',params.datatype)
+        end
+        Nhid = 100;
+        params.numsUnits = {Nsensory,Nhid};
+        params.typeUnits = {{SensoryUnitType},{'Bernoulli'}};
+        params.mods = {'none'};
+        
+        params.EACHBATCHISATRAJ = 1;
+        params.Ncases = 400;
+        params.Nbatches = 100;
+        params.Npretrain = 30;
+        params.NepochsMax = 25;
+        %params = setLearningSchedules(100,50,50,'exp',params,100,50);
+        %params = setLearningSchedules(10,10,10,'exp',params,100,50);
+        params = setLearningSchedules(100,100,100,'hyperbolic',params,100,100);
+        
+        % character set
+        gibbonsymbols = ' !"&''()*,-./0123456789:;=?[]_';
+        lowercaseletters = 'abcdefghijklmnopqrstuvwxyz';
+        capitalletters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        params.charset = [gibbonsymbols,capitalletters,lowercaseletters];
+        
+        % functions
+        if params.EACHBATCHISATRAJ, T = params.Ncases; else T = params.Nbatches; end
+        params.getLatents = @(Nexamples,yrclass,varargin)(...
+            getLatentsNull(Nexamples,yrclass,T,varargin{:}));
+        params.getData = @(S,Q)(getDataHDFRE(S,Q,params.charset,params.typeUnits{1}{1}));
+        params.testEFH = @(R,X,Q,wts)(testEFHNextFrameError(R,X,Q,wts,params));
+        params.getTestData = @(yrclass)(dynamicalDataWrapper(40,1000,yrclass,params));
+        
+        
+        
         
     otherwise
         
@@ -836,23 +1365,6 @@ end
 
 
 % universal PPC params
-FWHM = 1/6;                                 % deg (Deneve01: "45-75deg")
-c = FWHM/(2*sqrt(2*log(2)));                % std. dev. in degrees
-params.C = eye(params.Ndims)*c^2;
-%%% essentially, one std of the tuning curve (in one direction only) is
-%%% about 7% of the total grid; so the 1-std (in both directions) coverage
-%%% of each tuning curve is 14% of the total area.
-
-% grid parameters
-respLength = 1;                             % normalized to 1  *** (3) ***
-margin = 4*c;                               % 99.99%           *** (4) ***
-if isfield(params,'dynamics')
-    if strcmp(params.dynamics.walls,'wrapping'), margin = 0; end
-end
-params.respLength = respLength;
-params.margin = margin;
-params.gridsize = margin + respLength + margin;
-params.granularity = params.N/params.gridsize;
 
 
 % setColors
@@ -863,20 +1375,140 @@ params.EFHcolor = [0 1 0];                  % green
 params.OPTcolor = [0 0 0];                  % black
 
 
-% say
-fprintf('Using %f units...\n',params.granularity);
+end
+%-------------------------------------------------------------------------%
+%-------------------------------------------------------------------------%
 
-% check
-if (length(params.numsUnits) ~= length(params.typeUnits))
-    error('mismatch b/n number and types of layers --- jgm');
+
+%-------------------------------------------------------------------------%
+function [C,respLength,margin,gridsize,granularity] = getGridParams(Ndims,N,walls)
+
+FWHM = 1/6;                             % deg (Deneve01: "45-75deg")
+c = FWHM/(2*sqrt(2*log(2)));            % std. dev. in degrees
+C = eye(Ndims)*c^2;
+%%% essentially, one std of the tuning curve (in one direction only) is
+%%% about 7% of the total grid; so the 1-std (in both directions) coverage
+%%% of each tuning curve is 14% of the total area.
+
+% grid parameters
+respLength = 1;                         % normalized to 1  *** (3) ***
+margin = 4*c;                           % 99.99%           *** (4) ***
+if strcmp(walls,'wrapping'), margin = 0; end
+gridsize = margin + respLength + margin;
+granularity = N/gridsize;
+
+end
+%-------------------------------------------------------------------------%
+
+%-------------------------------------------------------------------------%
+function [S,Q] = getLatentsNull(Nexamples,yrclass,T,varargin)
+
+S           = zeros(Nexamples,0,1,yrclass);
+Q.T         = defaulter('sequencelength',T,varargin{:});
+Q.G         = [];
+Q.states    = [];
+Q.restarts  = [];
+%%% may actually want to populate restarts, based on Ntraj....
+
+end
+%-------------------------------------------------------------------------%
+
+%-------------------------------------------------------------------------%
+function [R,Q] = getDataNull(X,Q,visDstrbs)
+% USAGE:
+%   R = getDataNull(S,Q,params.typeUnits{1}{end});
+
+switch visDstrbs
+    case 'StandardNormal'
+        R = (Q.R - mean(Q.R))/chol(cov(Q.R));
+        %%%%
+        % consider just z-scoring, after the fashion of Suts
+        %%%%
+    case 'Bernoulli'
+        R = Q.R;
+        R(R>1) = 1;
+    otherwise % probably 'Poisson'
+        R = Q.R;
 end
 
-params.hier = 0;
+% strip R out of Q (no longer needed)
+Q = rmfield(Q,'R');
+
+end
+%-------------------------------------------------------------------------%
+
+%-------------------------------------------------------------------------%
+function [Rtest,Xtest,Qtest] = dynamicalDataWrapper(Ntraj,T,dataclass,params)
+
+
+if isfield(params,'mods')&&isfield(params,'Ndims')
+    if (params.Ndims == 1)&&~isfield(params,'delay')&&length(params.mods)==1
+        load([getdir('data'),'RBMish/testdata/data_1D_LTI-PPC.mat']);
+        if checkGPUavailability
+            Rtest = gpuArray(Rtest);
+            Xtest = gpuArray(Xtest);
+        end
+    elseif (params.Ndims==1)&&~isfield(params,'delay')&&...
+            (length(params.mods)==2)&&any(strcmp(params.mods,'Efference-Copy'))
+        load([getdir('data'),'RBMish/testdata/data_1D_LTI-PPC_withEC.mat']);
+        if checkGPUavailability
+            Rtest = gpuArray(Rtest);
+            Xtest = gpuArray(Xtest);
+        end
+    else
+        getLatents  = @(Nexamples,yrclass)(params.getLatents(Nexamples,...
+            yrclass,'sequencelength',T));
+        getData     = params.getData;
+        [Rtest,Xtest,Qtest] = generateData(Ntraj*T,getLatents,getData,dataclass);
+    end
+else
+    getLatents  = @(Nexamples,yrclass)(params.getLatents(Nexamples,...
+        yrclass,'sequencelength',T));
+    getData     = params.getData;
+    [Rtest,Xtest,Qtest] = generateData(Ntraj*T,getLatents,getData,dataclass);
+end
+
+end
+%-------------------------------------------------------------------------%
+
+%-------------------------------------------------------------------------%
+function [X,Q] = getLatentsClasses(Nexamples,yrclass,params)
+
+ps = params.mixingproportions;
+if strcmp(yrclass,'gpuArray'), ps = gpuArray(ps); end
+X = sampleT(repmat(ps',[Nexamples,1]),{'Categorical'},length(ps),params);
+Q = [];
 
 
 end
+%-------------------------------------------------------------------------%
 
+%-------------------------------------------------------------------------%
+function C = getNewObservationMatrix(H,SigmaYX)
+% Confusing: You want to construct the data such that conditional variance
+% of R, the neural response, is I; but the conditional variance of Y, what
+% (e.g.) the KF sees, is SigmaYX---all while keeping the underlying state Z
+% unchanged.  Recall also that the stimulus S = C*Z.  Hence, suppose
+%   R ~ N(C*Z,I)
+%   Y = M*R
+% for some undetermined C and M.  How should we choose these so
+%   E[Y|Z] = H*Z
+%   Cov[Y|Z] = SigmaYX
+% for some (determined) SigmaYX and H?  Well,
+%   E[Y|Z] = M*C*Z = M*S
+%   Cov[Y|Z] = M*Cov[R|Z]*M' = M*M'.
+% Hence,
+%   M := chol(SigmaYX)'
+%   C := inv(M)*H,
+% so indeed we have:
+%   R ~ N(S,I)
+%   Y ~ N(H*Z,SigmaYX)
 
+M = chol(SigmaYX)';
+C = M\H;
+
+end
+%-------------------------------------------------------------------------%
 
 
 % *** (1) ***
@@ -911,7 +1543,7 @@ end
 % *** (6) ***
 % Rationale for the IC priors:
 % Total number of trajectories (and therefore ICs):
-%   DBNmaxepoch*Ncases = 90*40 = 3600
+%   NepochsMax*Ncases = 90*40 = 3600
 % Want E[number of rejections] < 1
 % From lab notes:
 %   (1) v0_rare = sqrt(umax/dt/A*(A^2 - (x0_rare - b)^2)).
@@ -927,30 +1559,6 @@ end
 
 
 
-
-% params.posmin = [-(cos(pi/4)*L1 + L2); sin(pi/4)*(L1 - L2)];
-% params.posmax = [cos(pi/4)*(L1+L2); L1+L2]; % *** see (1) ***
-
-
-
-
-
-%-------------------------------------------------------------------------%
-% to update old params structures:
-%
-% params.smax = params.xmax;
-% params.smin = params.xmin;
-% params.Ndims = params.m;
-% params.Nmods = params.r;
-%
-% params = rmfield(params,'xmax');
-% params = rmfield(params,'xmin');
-% params = rmfield(params,'r');
-% params = rmfield(params,'m');
-%
-% params.MODEL = ...
-% params.NS = ...
-%-------------------------------------------------------------------------%
 
 
 
@@ -992,4 +1600,19 @@ end
 %-------------------------------------------------------------------------%
 
 
-
+%-------------------------------------------------------------------------%
+% Good settings for learning "mass":
+%
+% Poisson-Bernoulli wts: 500
+% Bernoulli biases: 120
+% Poisson biases: 120
+%
+% Poisson-Bernoulli wts, hyperbolic learning: 1500
+%
+% RTRBM, TRBM, rEFH (Poisson-Bernoulli wts): 120
+%
+% Bernoulli-Bernoulli wts: 100
+%
+% Erlang-Categorical wts: 15 (but maybe b/c the weight matrix is so small)
+% Categorical biases: 25
+%-------------------------------------------------------------------------%

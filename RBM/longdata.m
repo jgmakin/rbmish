@@ -1,12 +1,21 @@
 function varargout = longdata(varargin)
-% Go from the standard tensor to one with all examples in the first
-% dimension.  The order of the (cases? batches?) is preserved.
+% longdata      Transform the "standard" EFH-training tensor into a matrix
+% 
+% USAGES:
+%   Smat = longdata(Stensor)
+%   [Smat,Ymat] = longdata(Stensor,Rtensor)
 %
-% USAGE:
-%   Slong = longdata(Sshort)
-%   [Slong,Ylong] = longdata(Sshort,Yshort)
+% Given a tensor Stensor of size (Nrows x Ndims x ... x Nfinal), where the
+% omitted ways are not limited in number but must each have dimension 1, 
+% longdata returns a matrix of size (Nfinal*Nrows x Ndims).  Thus longdata
+% undoes shortdata.m.
+% 
+% NB! Consecutive examples in the *final* way of Stensor are preserved as
+% consecutive in the rows of Smat.
 
 %-------------------------------------------------------------------------%
+% Revised: 12/07/16
+%   -rewrote help
 % Revised: 12/10/13
 %   -changed to work with tensors with more than three "dimensions"---as
 %   long as the first and last are the number of cases and batchsize!

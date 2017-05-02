@@ -39,7 +39,7 @@ end
 % up-down pass
 [halfin,Si] = longdata(halfdata,S);
 clear D halfdata x;  
-[~, halfout] = updown(halfin,wts,params,'means');
+halfout = updownDBN(halfin,wts,params,'means');
 
 % display the results
 % griddisp(halfin,xi,wts,params,halfout);

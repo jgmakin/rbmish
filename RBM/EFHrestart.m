@@ -16,30 +16,26 @@
 % load rbmwts;
 % load('results\nonfinalwts\MCDwts140915.mat')
 
-
-% THINGS setParams.m WOULD HAVE DONE
-path(path,'../ee125/fxns');
-path(path,'parallel');
-path(path,'results');
-path(path,'dynamical');
-path(path,'tuningcurves');
-path(path,'retired');
-path(path,'scratch');
-path('../utils',path);  % contains your tex.m
-path(path,'../tools')
-
+%%%%% THINGS YOU SHOULD EDIT
+params.NepochsMax = 400;
+NepochsMax = params.NepochsMax;
+params = setLearningSchedules(100,100,100,'hyperbolic',params,1); 
+%%%%%%
 
 
 % THINGS DBN.m WOULD HAVE DONE
-i_rbm = 1; %%% by assumption
-[~,machine] = system('hostname');
-params.machine = strtrim(machine);
+iRBM = 1; %%% by assumption
+if checkGPUavailability, dataclass = 'gpuArray'; else dataclass = 'double'; end
 numsUnits = params.numsUnits;
 numRBMs = length(numsUnits)-1;
 Ncases = params.Ncases;
-Nbatches = 1000;
-Nvis = numsUnits(1);
-Nhid = numsUnits(i_rbm+1);
+Nbatches = params.Nbatches;
+hidDstrbs = params.typeUnits{iRBM+1};
+hidNums = params.numsUnits{iRBM+1};
+visDstrbs = params.typeUnits{iRBM};
+visNums = params.numsUnits{iRBM};
+Nvis = sum(visNums);
+Nhid = sum(hidNums);
 datagenargs = {}; %%% depends on what model you're loading
 TESTDECODING = 1;
 DISPLAYTESTS = 0;
@@ -48,62 +44,42 @@ Ntest = 5;
 
 % THINGS EFH.m WOULD HAVE DONE (if restart == 1)
 % extract/set params
-HIDFXN = params.typeUnits{i_rbm+1};
-VISFXN = params.typeUnits{i_rbm};
-% maxepoch = params.DBNmaxepoch;
-% amass = params.amass;
-
-
-%%%%% THINGS YOU SHOULD EDIT
-epoch = 51;
-% amass = 1.0;
-maxepoch = 90;
-%%%%%
-
-
-
-datagenargs = [datagenargs,{'dbndepth',i_rbm,'dbnwts',wts}];
+datagenargs = {'dbndepth',iRBM,'dbnwts',wts};
 [vishid,hidbiases,visbiases,vishidinc,hidbiasinc,visbiasinc] =...
-    reinitializeEFH(i_rbm,params.numsUnits,wts);
-batchposhidmeans = zeros(Ncases,Nhid,Nbatches,'like',params.mw);
-allErrors = zeros(maxepoch,1,'like',params.mw);
-restart=0; erravg=0; tErravg=inf; trErravg=inf; counter=0;
+    reinitializeEFH(iRBM,params.numsUnits,params.typeUnits,wts,...
+    params.datatype,dataclass);
+Ncdsteps = params.Ncdsteps;
+Recons.DISP = false(NepochsMax,1);
+Hiddens.DISP = false(NepochsMax,1);
+Weights.DISP = false(NepochsMax,1);
+ReconError.DISP = true(NepochsMax,1);
+TestError.DISP=false(NepochsMax,1);TestError.DISP(Ntest:Ntest:NepochsMax)=true;
+WeightNorm.DISP = true(NepochsMax,1);
+WeightVelocityNorm.DISP = false(NepochsMax,1);
 
-% plot errors
-if TESTDECODING
-    
-    if isfield(params,'dynamics')
-        testData = getLDSdata(params);
-    else
-        [Rtest,Stest] = DATAGENPP(Nbatches,params,datagenargs{:});
-        [testData.R,testData.S] = longdata(Rtest,Stest);
-        clear Rtest Stest
-    end
-    
-    yvar = []; vvar = [];
-    if usejava('desktop')
-        setColors;
-        figure(2014); clf; hold on;
-        subplot(1,2,1); hold on;
-        plotHandle(1) = plot(NaN,NaN);
-        hold off;
-        subplot(1,2,2); hold on;
-        plotHandle(2) = plot(NaN,NaN);
-        plotHandle(3) = plot(NaN,NaN);
-        hold off;
-    end
+if iRBM==1
+    figmap = containers.Map({'Recons','Hiddens','Weights','ReconError',...
+        'TestError','WeightNorm','WeightVelocityNorm'},{Recons,Hiddens,...
+        Weights,ReconError,TestError,WeightNorm,WeightVelocityNorm});
+else
+    %%%%% until you fix these---altho' at the moment these don't do
+    %%%%% anything....
+    Weights.DISP=false(NepochsMax,1);
+    Recons.DISP=false(NepochsMax,1);
 end
+figmap = EFHdisp(figmap,datagenargs,iRBM,0,wts,params);
+
 
 
 
 % NOW OVERWRITE WITH THE LOADED WEIGHTS
-vishid = wts{i_rbm}(1:end-1,:);
-hidbiases = wts{i_rbm}(end,:);
-visbiases = wts{numRBMs*2-i_rbm+1}(end,:)';
+vishid = wts{iRBM}(1:end-1,:);
+hidbiases = wts{iRBM}(end,:);
+visbiases = wts{numRBMs*2-iRBM+1}(end,:)';
 
 % run 
 EFH
 
 % store the resulting weights!
-wts{i_rbm} = [vishid; hidbiases];
-wts{numRBMs*2-i_rbm+1} = [vishid'; visbiases'];
+wts{iRBM} = [vishid; hidbiases];
+wts{numRBMs*2-iRBM+1} = [vishid'; visbiases'];
