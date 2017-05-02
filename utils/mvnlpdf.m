@@ -1,23 +1,23 @@
 function y = mvnlpdf(X, Mu, Sigma)
-%MVNPDF Multivariate normal log probability density function (lpdf).
-%   Y = MVNPDF(X) returns the probability density of the multivariate normal
+%MVNLPDF Multivariate normal log probability density function (lpdf).
+%   Y = MVNLPDF(X) returns the probability density of the multivariate normal
 %   distribution with zero mean and identity covariance matrix, evaluated at
 %   each row of X.  Rows of the N-by-D matrix X correspond to observations or
 %   points, and columns correspond to variables or coordinates.  Y is an
 %   N-by-1 vector.
 %
-%   Y = MVNPDF(X,MU) returns the density of the multivariate normal
+%   Y = MVNLPDF(X,MU) returns the density of the multivariate normal
 %   distribution with mean MU and identity covariance matrix, evaluated
 %   at each row of X.  MU is a 1-by-D vector, or an N-by-D matrix, in which
 %   case the density is evaluated for each row of X with the corresponding
-%   row of MU.  MU can also be a scalar value, which MVNPDF replicates to
+%   row of MU.  MU can also be a scalar value, which MVNLPDF replicates to
 %   match the size of X.
 %
-%   Y = MVNPDF(X,MU,SIGMA) returns the density of the multivariate normal
+%   Y = MVNLPDF(X,MU,SIGMA) returns the density of the multivariate normal
 %   distribution with mean MU and covariance SIGMA, evaluated at each row
 %   of X.  SIGMA is a D-by-D matrix, or an D-by-D-by-N array, in which case
 %   the density is evaluated for each row of X with the corresponding page
-%   of SIGMA, i.e., MVNPDF computes Y(I) using X(I,:) and SIGMA(:,:,I).
+%   of SIGMA, i.e., MVNLPDF computes Y(I) using X(I,:) and SIGMA(:,:,I).
 %   If the covariance matrix is diagonal, containing variances along the 
 %   diagonal and zero covariances off the diagonal, SIGMA may also be
 %   specified as a 1-by-D matrix or a 1-by-D-by-N array, containing 
@@ -77,10 +77,10 @@ elseif ndims(Mu) == 2
     elseif n2 == n % lengths match
         X0 = X - Mu;
     elseif n2 == 1 % mean is a single row, rep it out to match data
-        X0 = bsxfun(@minus,X,Mu);
+        X0 = X - Mu;
     elseif n == 1 % data is a single row, rep it out to match mean
         n = n2;
-        X0 = bsxfun(@minus,X,Mu);  
+        X0 = X - Mu;
     else % sizes don't match
         error('stats:mvnpdf:InputSizeMismatch',...
               ['X or MU must be a row vector, or X and MU must have the '...
@@ -136,7 +136,7 @@ elseif ndims(Sigma) == 2
                     'All elements of diagonal SIGMA must be positive.');
             end
             R = sqrt(Sigma);
-            xRinv = bsxfun(@rdivide,X0,R);
+            xRinv = X0./R;
             logSqrtDetSigma = sum(log(R));
         else
             % Make sure Sigma is a valid covariance matrix

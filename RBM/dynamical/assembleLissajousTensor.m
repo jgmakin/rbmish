@@ -33,17 +33,15 @@ Ninputs = size(xmin,1);
 
 
 % Lissajous parameters
-t = 0:dt:(dt*(T-1));                                    % 1 x T
-b = (xmax' + xmin')/2;                                  % 1 x Ninputs
-A = (xmax' - xmin')/2;                                  % 1 x Ninputs
-A = eta*A;                                              % ...margin ctrl
-z0 = bsxfun(@minus,x0,b)./repmat(A,[Ncases,1]);         % Ncases x Ninputs
-phi = asin(z0);                                         % Ncases x Ninputs
-w = (asin(dt*bsxfun(@rdivide,v0,A) + z0)-phi)/dt;       % Ncases x Ninputs
+t = 0:dt:(dt*(T-1));                            % 1 x T
+b = (xmax' + xmin')/2;                          % 1 x Ninputs
+A = (xmax' - xmin')/2;                          % 1 x Ninputs
+A = eta*A;                                      % ...margin ctrl
+z0 = (x0-b)./repmat(A,[Ncases,1]);              % Ncases x Ninputs
+phi = asin(z0);                                 % Ncases x Ninputs
+w = (asin(dt*(v0./A) + z0)-phi)/dt;             % Ncases x Ninputs
 
-R = bsxfun(@plus,...
-    bsxfun(@times,A,sin(bsxfun(@plus,...
-    reshape(w(:)*t,[Ncases,Ninputs,T]),phi))),b);
+R = A.*sin(reshape(w(:)*t,[Ncases,Ninputs,T]) + phi) + b;
 
 
 end

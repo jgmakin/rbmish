@@ -12,8 +12,6 @@ function showrfs(A,bg)
 %   -from code by B.A. Olshausen (c. 2006)
 %-------------------------------------------------------------------------%
 
-
-
 if ~exist('bg','var')
     bg='black';
 end
@@ -44,12 +42,10 @@ end
 k=1;
 for j=1:n
     for i=1:m
-        
         clim=max(abs(A(:,k)));
         array(buf+(i-1)*(sz+buf)+[1:sz],buf+(j-1)*(sz+buf)+[1:sz])=...
             reshape(A(:,k),sz,sz)/clim;
         k=k+1;
-        
     end
 end
 

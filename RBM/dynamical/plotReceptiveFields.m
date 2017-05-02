@@ -1,4 +1,4 @@
-function plotReceptiveFields(filterdata,V0)
+function plotReceptiveFields(Z,V0)
 % plot some receptive fields of the dynamical RBM
 
 
@@ -14,11 +14,9 @@ function plotReceptiveFields(filterdata,V0)
 
 % collect into useful form
 [Ncases,Nneurons,T] = size(V0);
-X = [];
-for t = 1:T
-    X = cat(4,X,filterdata(t).states);
-end
 
+%%%% not clear if Z is the right size---CHECK ME....
+X = Z;
 
 % plot1DReceptiveFields(X,V0)
 plot2DReceptiveFields(X,V0,1,2);

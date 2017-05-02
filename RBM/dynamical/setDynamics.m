@@ -1,11 +1,21 @@
-function dynamics = setDynamics(params)
+function dynamics = setDynamics(Ndims,mods,xmin,xmax)
+% setDynamics   Set dynamics for rEFH simulations
+%
+% NB that this function sets a *uniform* prior over position and a tight
+% prior about 0 over velocity.
+
+%-------------------------------------------------------------------------%
+% Revised: 08/24/16
+%   -changed input arguments from params to the necessary parts
+%   -commented
+% Created: ??/??/??
+%   by JGM
+%-------------------------------------------------------------------------%
+
 
 % init
-NnonECpops = sum(~strcmp(params.mods,'Efference-Copy'));
-Ndims = params.Ndims;
+NnonECpops = sum(~strcmp(mods,'Efference-Copy'));
 Nstates = 2*Ndims;                              % second-order dynamics
-xmin = params.smin(:,strcmp(params.mods,params.NS));
-xmax = params.smax(:,strcmp(params.mods,params.NS));
 xrange = xmax - xmin;
 
 
@@ -16,28 +26,23 @@ b = 0.25;                                       % damping
 k = 3;                                          % spring force 
 A = [eye(Ndims)             dt*eye(Ndims);...
     -k/m*dt*eye(Ndims)      -(b/m*dt-1)*eye(Ndims)];
-%%%%%%
-% A = [0.9892 0.0474; -0.3361 0.8269];
-% A = [1 0.05; -0.34 0.83];
-%%%%%%
-C = zeros(Ndims*NnonECpops,size(A,1));
+C = zeros(Ndims*NnonECpops,Nstates);
 C(1:Ndims*NnonECpops,1:Ndims*NnonECpops) = eye(Ndims*NnonECpops);
 
 % transition noise
-posVar = 5e-7;
-velVar = 5e-5;
-SigmaX = [posVar*eye(Ndims) zeros(Ndims); zeros(Ndims) velVar*eye(Ndims)];
-muX = zeros(Nstates,1);
+posVar  = 5e-7;
+velVar  = 5e-5;
+SigmaX  = blkdiag(posVar*eye(Ndims),velVar*eye(Ndims));
 
 % prior---assumes no position-velocity coupling
-muX0 = xrange/2 + xmin;
+muX0    = xrange/2 + xmin;
 SigmaX0 = diag(Inf*(1:Ndims)); % diag(range/4);
-muV0 = zeros(Ndims,1);
+muV0    = zeros(Ndims,1);
 SigmaV0 = 5e-10;
 
 
 % are there controls?
-if any(strcmp(params.mods,'Efference-Copy'));
+if any(strcmp(mods,'Efference-Copy'));
     
     % x[t+1] = A*x[t] + G*u[t] + noise,     y[t] = C*x[t] + noise 
     % u[t+1] = F*u[t] + noise,              v[t+1] = H*u[t] + noise
@@ -52,60 +57,35 @@ if any(strcmp(params.mods,'Efference-Copy'));
     muU0 = 0*ones(Ninputs,1);
     SigmaU0 = (5e-10)*eye(Ninputs);
 
-    % put noise in range that yields good HSVs
+    % put position/velocity noise in range that yields good HSVs
     SigmaU = 7.5e-4*eye(Ninputs);
     SigmaX(1:Ndims,1:Ndims) = 5e-5*eye(Ndims);
     SigmaX(Ndims+1:end,Ndims+1:end) = 1e-6*eye(Ndims);
     
-    
-    
     % load into structure
-    dynamics.F = F;
-    dynamics.G = G;
-    dynamics.H = H;
-    dynamics.SigmaU = SigmaU;
     dynamics.muU0 = muU0;
     dynamics.SigmaU0 = SigmaU0;
-
     
-    % test Hankel singular values (can the system be model-order reduced?)
-    Gamma = zeros(Nstates+Ninputs,Nstates+Ninputs);
-    Gamma(1:Nstates,1:Nstates) = A; 
-    Gamma(1:Nstates,Nstates+1:end) = G;
-    Gamma(Nstates+1:end,Nstates+1:end) = F;
-    %%% Lambda = zeros(2*Ndims,Nstates+Ninputs);
-    %%% Lambda(1:Ndims,1:Nstates) = C;
-    %%% Lambda(Ndims+1:end,Nstates+1:end) = H; % we don't care how visible
-    %%%the control is in *its* observation, which we're sure is big
-    Lambda = zeros(Ndims*NnonECpops,Nstates+Ninputs);
-    Lambda(1:Ndims*NnonECpops,1:Nstates) = C;  
-    %%%
-    UpsilonZ = zeros(Nstates+Ninputs,Nstates+Ninputs);
-    UpsilonZ(1:Nstates,1:Nstates) = SigmaX;
-    UpsilonZ(Nstates+1:end,Nstates+1:end) = SigmaU;
-    try 
-        P = dlyap(Gamma,UpsilonZ);                  % UpsilonZ = B*B'
-        Q = dlyap(Gamma',Lambda'*Lambda);
-        hsvs = sqrt(eig(P*Q));
-        fprintf('Hankel singular values: %f, %f, and %f\n',hsvs)
-    catch ME
-        fprintf('can''t print Hankel SVs: out of control ');
-        fprintf('toolbox licenses -- jgm\n')
-    end
+    % augment the parameters
+    A = [A, G; zeros(size(F,1),size(A,2)), F];
+    C = blkdiag(C,H);
+    SigmaX = blkdiag(SigmaX,SigmaU);
     
-else
-    % test Hankel singular values (can the system be model-order reduced?)
-    try 
-        P = dlyap(A,SigmaX);                         % SigmaX = B*B'
-        Q = dlyap(A',C'*C);
-        hsvs = sqrt(eig(P*Q));
-        fprintf('Hankel singular values: %f and %f\n',hsvs)
-    catch ME
-        fprintf('can''t print Hankel SVs: out of control ');
-        fprintf('toolbox licenses -- jgm\n')
-    end
 end
 
+% test Hankel singular values (can the system be model-order reduced?)
+try
+    P = dlyap(A,SigmaX);                         % SigmaX = B*B'
+    Q = dlyap(A',C'*C);
+    hsvs = sqrt(eig(P*Q));
+    fprintf('Hankel singular values: %f and %f\n',hsvs)
+catch ME
+    fprintf('can''t print Hankel SVs: out of control ');
+    fprintf('toolbox licenses -- jgm\n')
+end
+
+% finally, create state-transition "bias" at all zeros
+muX = zeros(size(SigmaX,1),1);
 
 % load into a structure
 dynamics.A = A;
@@ -117,11 +97,7 @@ dynamics.SigmaX0 = SigmaX0;
 dynamics.SigmaV0 = SigmaV0;
 dynamics.muV0 = muV0;
 dynamics.dt = dt;
-
-% what happens at the walls?
-% bouncing | resetting | linearInXY | quadraticbowl | repelling | wrapping
-dynamics.walls = 'wrapping';
-
+dynamics.m = m;
 
 
 

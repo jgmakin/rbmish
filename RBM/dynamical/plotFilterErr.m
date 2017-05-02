@@ -1,4 +1,5 @@
 function plotFilterErr(t0,LDSdata,params,varargin)
+%%% It may work, but this function appears not to be in use as of 12/8/16.
 
 %-------------------------------------------------------------------------%
 % Revised: 01/27/15
@@ -12,44 +13,48 @@ function plotFilterErr(t0,LDSdata,params,varargin)
 
 
 % init
-samples = t0:1000;
 Ndims = params.Ndims;
-Ncases = params.Ncases;
-Nmods = params.Nmods;
+Nmods = length(params.mods);
 Nstates = size(params.dynamics.A,2);
 smin = params.smin;
 smax = params.smax;
-if Ndims==2, th0 = get2DOutline(params.thmin,params.thmax,42); end
+if Ndims==2
+    th0 = get2DOutline(params.roboparams.thmin,params.roboparams.thmax,42); 
+end
 % NSind = strcmp(params.mods,params.NS);
 % [Ncases,q,Nbatches] = size(x0);
 Nfltrs = length(varargin);
 Z = LDSdata.Z;
-
+[Ntraj,~,T] = size(Z);
+samples = t0:T;
         
 % malloc
 thisShat = NaN(Ndims,length(samples),Nfltrs);
 thisCvrn = NaN(Ndims,Ndims,length(samples),Nfltrs);
 
 % loop
-for iCase = 1:Ncases
+for iTraj = 1:Ntraj
     for iMod = 1:Nmods
 
+        %%%%%% BROKEN: you got rid of params.dynamics.H
         switch iMod
             case 1
                 thisS(1:Ndims,1:length(samples)) = params.dynamics.C*...
-                    squeeze(Z(iCase,1:Nstates,samples));
+                    squeeze(Z(iTraj,1:Nstates,samples));
             case 2
                 thisS(1:Ndims,1:length(samples)) = params.dynamics.H*...
-                    squeeze(Z(iCase,Nstates+1:end,samples));
+                    squeeze(Z(iTraj,Nstates+1:end,samples));
         end
         % thisS(1:Ndims,1:length(samples)) = squeeze(S0(iCase,:,iMod,samples));
+        %%%%%%
+        
         
         inds = 1+(iMod-1)*Ndims:(iMod*Ndims);
         for iFltr = 1:Nfltrs
             thisShat(:,:,iFltr) =...
-                squeeze(varargin{iFltr}.Xpct(iCase,inds,samples));
+                squeeze(varargin{iFltr}.Xpct(iTraj,inds,samples));
             thisCvrn(:,:,:,iFltr) =...
-                squeeze(varargin{iFltr}.Cvrn(iCase,inds,inds,samples));
+                squeeze(varargin{iFltr}.Cvrn(iTraj,inds,inds,samples));
         end
         
         
@@ -105,7 +110,7 @@ for iCase = 1:Ncases
             % axis([params.thmin(1) params.thmax(1) params.thmin(2) params.thmax(2)]);
             plot(th0(:,1),th0(:,2),'k')
             axis equal
-            title(num2str(iCase))
+            title(num2str(iTraj))
             hold off
         end
         

@@ -19,7 +19,7 @@ if 0
     acx = 0;
     acy = 0;
     for iTraj = 1:Ntraj
-        s = scalefxn(squeeze(S(iTraj,:)),trajmin,trajmax,0,2*pi);
+        s = scalefxn(S(iTraj,:)',trajmin,trajmax,0,2*pi);
         acx = acx + xcorr(cos(s),cos(s),tauMax,'none');
         acy = acy + xcorr(sin(s),sin(s),tauMax,'none');
         %%% using the mean of these is identical to using the real part of:
@@ -41,10 +41,10 @@ if 0
 else
     ac = zeros(1,tauMax);
     for iTraj = 1:Ntraj
-        s = scalefxn(squeeze(S(iTraj,:)),trajmin,trajmax,0,2*pi);
+        s = scalefxn(S(iTraj,:)',trajmin,trajmax,0,2*pi);
         for tau = 0:(tauMax-1)
-            a = s(1:(end-tau))';
-            b = s((1+tau):end)';
+            a = s(1:(end-tau));
+            b = s((1+tau):end);
             n = length(a);
             
             num3 = (cos(a)'*cos(b))*(sin(a)'*sin(b)) - (cos(a)'*sin(b))*(sin(a)'*cos(b));

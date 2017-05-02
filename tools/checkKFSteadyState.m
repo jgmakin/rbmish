@@ -15,7 +15,7 @@ function ressum = checkKFSteadyState(CvrnMat,params)
 A = params.A;
 C = params.C;
 SigmaX = params.SigmaX;
-SigmaY = params.SigmaY;
+SigmaYX = params.SigmaYX;
 Nstates = size(A,1);
 
 
@@ -28,7 +28,7 @@ elseif rank(obsv(A,C)) < Nstates
     fprintf('unobservable...\n');
     ressum = NaN;
 else
-    [P,L,G] = dare(A',C',SigmaX,SigmaY);
+    [P,L,G] = dare(A',C',SigmaX,SigmaYX);
     % are P and the final time-updated covariance equal?
     res = P - (A*CvrnMat(:,:,end)*A' + SigmaX);
     ressum = sum(abs(res(:)));

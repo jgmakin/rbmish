@@ -1,5 +1,5 @@
 function CvrnMX = covX2covMX(CvrnX,M)
-% A strange function, perhaps. CvrnXhat is a tensor of covariance matrices:
+% A strange function, perhaps. CvrnX is a tensor of covariance matrices:
 %   
 %   Ncols x Ncols x T
 %

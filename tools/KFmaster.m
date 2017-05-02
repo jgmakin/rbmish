@@ -47,7 +47,7 @@ params.C = [1 0];
 
 % SigmaX = 5;
 params.SigmaX = [4 0; 0 0];
-params.SigmaY = 2.5;
+params.SigmaYX = 2.5;
 
 end
 %-------------------------------------------------------------------------%
@@ -72,9 +72,9 @@ if det(params.SigmaX)==0, SigmaXonehalf = sqrt(params.SigmaX);
 else SigmaXonehalf = sqrtm(params.SigmaX); 
 end
 
-if det(params.SigmaY)==0, SigmaYonehalf = sqrt(params.SigmaY);
+if det(params.SigmaYX)==0, SigmaYonehalf = sqrt(params.SigmaYX);
     %%% this is rather hacky....
-else SigmaYonehalf = sqrtm(params.SigmaY); 
+else SigmaYonehalf = sqrtm(params.SigmaYX); 
 end
 
 

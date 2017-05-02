@@ -86,51 +86,32 @@ end
 %-------------------------------------------------------------------------%
 function smpls = getPoisCumProbLoopD(mus,u,q,p)
 
-smpls = sum(...
-    bsxfun(@gt,u,...
-    bsxfun(@times,p,...
-    cumsum(bsxfun(@rdivide,...
-    bsxfun(@power,mus,0:7),factorial(0:7)),2))),2);
-
+smpls = loopDcore(0:7,mus,u,p);
 
 if sum(smpls==8)>0
-    smpls(smpls==8) = sum(...
-        bsxfun(@gt,u(smpls==8),...
-        bsxfun(@times,p(smpls==8),...
-        cumsum(bsxfun(@rdivide,...
-        bsxfun(@power,mus(smpls==8),8:15),factorial(8:15)),2))),2);
+    smpls(smpls==8) = loopDcore(8:5,mus(smpls==8),u(smpls==8),p(smpls==8));
 
     if sum(smpls==16)>0
-        smpl(smpls==16)  =sum(...
-	    bsxfun(@gt,u(smpls==16),...
-	    bsxfun(@times,p(smpls==16),...
-	    cumsum(bsxfun(@rdivide,...
-	    bsxfun(@power,mus(smpls==16),16:23),factorial(16:23)),2))),2);
-
-	if sum(smpls==24)>0
-            smpl(smpls==24)  =sum(...
-	        bsxfun(@gt,u(smpls==24),...
-	        bsxfun(@times,p(smpls==24),...
-	        cumsum(bsxfun(@rdivide,...
-	        bsxfun(@poweer,mus(smpls==24),24:31),factorial(24:31)),2))),2);
-
-	    if sum(smpls==32)>0
-        	smpl(smpls==32)  =sum(...
-	    	    bsxfun(@gt,u(smpls==32),...
-	    	    bsxfun(@times,p(smpls==32),...
-	    	    cumsum(bsxfun(@rdivide,...
-	    	    bsxfun(@poweer,mus(smpls==32),32:39),factorial(32:39)),2))),2);
-    	    end
-
-
+        smpls(smpls==16) = loopDcore(16:23,mus(smpls==16),u(smpls==16),p(smpls==16));
+        
+        if sum(smpls==24)>0
+            smpls(smpls==24) = loopDcore(24:31,mus(smpls==24),u(smpls==24),p(smpls==24));
+            
+            if sum(smpls==32)>0
+                smpls(smpls==32) = loopDcore(32:39,mus(smpls==32),u(smpls==32),p(smpls==32));
+            end
         end
-
     end
 end
 
+end
+%-------------------------------------------------------------------------%
 
 
+%-------------------------------------------------------------------------%
+function smpls = loopDcore(inds,mus,u,p)
 
+smpls = sum(u > p.*cumsum((mus.^inds)./factorial(inds),2),2);
 
 end
 %-------------------------------------------------------------------------%

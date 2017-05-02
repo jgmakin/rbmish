@@ -1,35 +1,80 @@
-function [pKF, LDSparams] = obsKFwithNoInput(LDSdataTrain,LDSdataTest,params)
-% [pKF, LDSparams] = obsKFwithNoInput(LDSdata,LDSdataTest,params)
+function [pKF, LDSparams] = obsKFwithNoInput(Ytrain,Xtrain,...
+    unisensCmlntsTest,Q,params)
+% USAGE:
+%   [pKF, LDSparams] = obsKFwithNoInput(Ytrain,Xtrain,unisensCmlntsTest,...
+%       Q,params)
 %
-% Suppose the data are driven by an "efference copy," but the filter just
-% decides to ignore it.  This function provides the parameters and filter
-% cumulants in that case.
+% This function serves an extremely circumscribed purpose: fit and test an
+% LTI system on only one of the observations and only the first two of the
+% states.  You use it when the third (ignored) state is the "control," and
+% the second observation is the "efference copy" of this control.  This is
+% a pretty low bar, since there are in fact better ways to use just two
+% states to fit these data--ways which EM will find, but this (regression-
+% based) function will not.
 
 %-------------------------------------------------------------------------%
+% Revised: 01/09/17
+%   -rewrote from scratch as part of Grand Revision
 % Created: 09/04/14
 %   by JGM
 %-------------------------------------------------------------------------%
 
 % Ns
-[Ny,Nx] = size(params.dynamics.C);
-Noutputs = size(LDSdataTrain.Y,2);
+T = Q.T;
+Nexamples = size(Ytrain,1);
+Ntraj = floor(Nexamples/T);
+Ndims = size(unisensCmlntsTest.Xpct,2);
 
-% train
-LDSdataTrain.Z = LDSdataTrain.Z(:,1:Nx,:);
-LDSdataTrain.Y = LDSdataTrain.Y(:,1:Ny,:);
-LDSdataTrain.SigmaY = LDSdataTrain.SigmaY(:,1:Ny,1:Ny,:);
-LDSparams = getLDSparams(params,'observed',LDSdataTrain);
+% use only the first modality
+params.mods = params.mods(1);
+unisensCmlntsTest.Xpct = unisensCmlntsTest.Xpct(:,:,1);
+unisensCmlntsTest.Info = unisensCmlntsTest.Info(:,:,:,1);
+Ytrain = Ytrain(:,1:size(unisensCmlntsTest.Xpct,2));
 
-% test
-LDSdataTest.Z = LDSdataTest.Z(:,1:Nx,:);
-LDSdataTest.Y = LDSdataTest.Y(:,1:Ny,:);
-LDSdataTest.SigmaY = LDSdataTest.SigmaY(:,1:Ny,1:Ny,:);
-pKF = KF4PPC(LDSdataTest,LDSparams,'obs');
+% use only the first two states
+Xtrain = Xtrain(:,1:2);
 
-keyboard
+% fit
+LDSparams = learnfullyobservedLDS(shortdata(Ntraj,3,Ytrain),...
+    shortdata(Ntraj,3,Xtrain));
 
-% pad with NaNs
-[Ntraj,~,T] = size(pKF.Xpct);
-pKF.Xpct = cat(2,pKF.Xpct,nan([Ntraj,Noutputs-Ny,T])); % 'like' ?...
+% filter
+pKF = KFposteriorization(unisensCmlntsTest,Q,LDSparams,params);
+
+% pad with NaNs to make the same size as other posteriors
+pKF.Xpct = cat(3,pKF.Xpct,NaN([Nexamples,Ndims,]));
+pKF.Info = cat(4,pKF.Info,NaN([Nexamples,Ndims,Ndims,1]));
 
 end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

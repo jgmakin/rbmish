@@ -53,7 +53,7 @@ for iUnit = 1:Nhid
         beta0(iUnit) = NaN;
         beta1(iUnit) = NaN;
     else
-        xScaled = scalefxn(x',trajmin,trajmax,0,2*pi)';
+        xScaled = scalefxn(x,trajmin,trajmax,0,2*pi);
         [beta0(iUnit),beta1(iUnit)] = circle_regress(v,xScaled,[0 upperBound]);
         Rsq(iUnit) = getRsq(xScaled,beta1(iUnit)*v+beta0(iUnit),'RHOSQ');
         
@@ -83,7 +83,7 @@ function plotSpikes(x1,x2,beta0,beta1,xmin,xmax,titlestr)
 
 M = 100;
 vPts = linspace(min(x1),max(x1),M)';
-xhat = scalefxn(mod(beta1*vPts + beta0,2*pi)',0,2*pi,xmin,xmax)';
+xhat = scalefxn(mod(beta1*vPts + beta0,2*pi),0,2*pi,xmin,xmax);
 
 scatterhist(x1,x2)
 hold all

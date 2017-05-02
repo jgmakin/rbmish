@@ -13,8 +13,8 @@ function ind = categorsmplPP(pmf,n)
 
 cmf = cumsum(pmf);
 
-ind = zeros(n,1);
-parfor i = 1:n
+ind = zeros(n,1,'like',pmf);
+parfor i = 1:n, 
     ind(i) = find(cmf>rand,1);
 end
 

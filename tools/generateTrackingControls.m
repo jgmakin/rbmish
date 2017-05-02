@@ -89,8 +89,8 @@ for t = 1:T
     u = Uopt(:,:,t)' - K*e;
     
     % don't let the input go outside its limits
-    u = bsxfun(@ge,u,umin).*u + bsxfun(@times,bsxfun(@lt,u,umin),umin);
-    u = bsxfun(@le,u,umax).*u + bsxfun(@times,bsxfun(@gt,u,umax),umax);
+    u = (u >= umin).*u + (u < umin).*umin;
+    u = (u <= umax).*u + (u > umax).*umax;
     
     % store input and state
     U(:,:,t) = u';

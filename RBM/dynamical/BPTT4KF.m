@@ -59,8 +59,8 @@ for iTraj = 1:Ntraj
     
     % Kalman filter this trajectory
     y = shiftdim(LDSdata.Y(iTraj,:,:),1);
-    SigYZ = shiftdim(LDSdata.SigmaY(iTraj,:,:,:),1);
-    KF = KalmanFilter(setfield(LDSparams,'SigmaY',SigYZ),y);
+    SigYZ = shiftdim(LDSdata.SigmaYX(iTraj,:,:,:),1);
+    KF = KalmanFilter(setfield(LDSparams,'SigmaYX',SigYZ),y);
     zhat = KF.XHATMU;
     P = KF.CVRNMU;
     
@@ -94,33 +94,34 @@ for iTraj = 1:Ntraj
     
     
     % assemble pieces for parameter updates
-    FplusF = permute(F,[1,3,2]) + permute(F,[2,3,1]);
-    FA = tensorOp(FplusF,permute(repmat(A,[1,1,T]),[1,3,2]));
-    FAP = tensorOp(FA(:,2:end,:),permute(P(:,:,1:end-1),[1,3,2]));
-    Wtutg = tensorOp(permute(Wtut,[2,3,1]),g);
+    FplusF = F + permute(F,[2,1,3]);                        % Nz x Nz x T
+    FA = tensorOp(FplusF,repmat(A,[1,1,T]));                % Nz x Nz x T
+    FAP = tensorOp(FA(:,:,2:end),P(:,:,1:end-1),[1,3,2]);   % Nz x Nz x T-1
+    Wtutg = permute(tensorOp(permute(Wtut,[2,1,3]),...
+        permute(g,[1,3,2])),[1,3,2]);                       % Nz x T
     
-    delA = (Wtutg(:,2:end)*zhat(:,1:end-1)' + sum(permute(FAP,[1,3,2]),3))/T;    
-    delSigZ = (squeeze(sum(FplusF,2)) - diag(diag(sum(F,3))))/T;
+    delA = (Wtutg(:,2:end)*zhat(:,1:end-1)' + sum(FAP,3))/T;% Nz x Nz
+    delSigZ = (sum(FplusF,3) - diag(diag(sum(F,3))))/T;     % Nz x Nz
     
-    % pretty unforunate
-    diffQinv = tensorOp(permute(C*A*zhat(:,1:end-1) - y(:,2:end),[3,2,1]),...
-        permute(Qinv(:,:,2:end),[1,3,2]));
-    Wytgt = tensorOp(permute(Wyt,[2,3,1]),g);
+    % pretty unfortunate
+    diffQinv = permute(tensorOp(...
+        permute(C*A*zhat(:,1:end-1) - y(:,2:end),[3,1,2]),...
+        Qinv(:,:,2:end)),[2,3,1]);                          % Ny x T-1
+    Wytgt = permute(tensorOp(permute(Wyt,[2,1,3]),...
+        permute(g,[1,3,2])),[1,3,2]);                       % Ny x T
+    WytBt = tensorOp(permute(Wyt,[2,1,3]),B);               % Ny x Nz x T
     
-    WytBt = tensorOp(permute(Wyt,[2,3,1]),permute(B,[1,3,2]));
     delSigYZ = (Wytgt(:,2:end)*diffQinv' +...
-        sum(tensorOp(WytBt(:,2:end,:),permute(Wyt(:,:,2:end),[1,3,2])),2))/T;
+        sum(tensorOp(WytBt(:,:,2:end),Wyt(:,:,2:end)),3))/T;% Ny x Ny
     
-    gtPt = tensorOp(permute(g,[3,2,1]),permute(P,[1,3,2]));
-    BplusB = B + permute(B,[2,1,3]);
-    BBP = tensorOp(permute(BplusB,[1,3,2]),permute(P,[1,3,2]));
-    foo1 = 2*err(:,2:end)*zhat(:,2:end)';
-    foo2 = -permute(sum(tensorOp(permute(diffQinv,[3,2,1]),...
-        gtPt(:,2:end,:)),2),[1,3,2]);
-    foo3 = -Wytgt(:,2:end)*zhat(:,2:end)';
-    foo4 = -permute(sum(tensorOp(permute(Wyt(:,:,2:end),[2,3,1]),...
-        BBP(:,2:end,:)),2),[1,3,2]);
-    delC = (foo1 + foo2 + foo3 + foo4)/T;
+    gtPt = permute(tensorOp(permute(g,[3,1,2]),P),[2,3,1]); % Nz x T
+    BBP = tensorOp(B + permute(B,[2,1,3]),P);               % Nz x Nz x T
+    foo1 = 2*err(:,2:end)*zhat(:,2:end)';                   % Ny x Nz
+    foo2 = -diffQinv*gtPt(:,2:end)';                        % Ny x Nz
+    foo3 = -Wytgt(:,2:end)*zhat(:,2:end)';                  % Ny x Nz
+    foo4 = -sum(tensorOp(permute(Wyt(:,:,2:end),[2,1,3]),...
+        BBP(:,:,2:end)),3);                                 % Ny x Nz
+    delC = (foo1 + foo2 + foo3 + foo4)/T;                   % Ny x Nz
     
     
     % update params

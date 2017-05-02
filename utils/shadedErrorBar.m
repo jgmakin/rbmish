@@ -78,7 +78,7 @@ end
 
 
 %If only one error bar is specified then we will mirror it, turning it into
-%both upper and lower bars. 
+%both upper and lower bars.
 if length(errBar)==length(errBar(:))
     errBar=repmat(errBar(:)',2,1);
 else

@@ -44,54 +44,54 @@ pvalue = 0.95; % 0.99;
 
 
 % get edge vector
-edgevector = getEdgeVector(X,Nxbins,params);
+edgevector = getEdgeVector(X,Nxbins,params,'3STD');
 lagvector = lag0:lagF;
 Nlags = length(lagvector);
 
 % malloc (order: Nunits x Nlags x Nxbins)
-P = zeros(Nunits,Nxbins,Nlags);     % P(Z_t=1|X_{t-tau}), all tau, units
+P = zeros(Nxbins,Nunits,Nlags);     % P(Z_t=1|X_{t-tau}), all tau, units
 MI = zeros(Nunits,Nlags);           % MI(X_{t-tau},Z_t), all tau, all units
-MIshuffled = zeros(Nreshuffles,1);
+MIshuffled = zeros(Nreshuffles,Nunits);
 thr = zeros(Nunits,Nlags);
 
 % get MI(Z;X) and P(Z=1|X)
 tic;
 fprintf('looping through lags...\n');
 for iLag = 1:Nlags
+    
+    % ...
     [z,x] = siftData(Z,X,lagvector(iLag),varargin{:});
-    for iUnit = 1:Nunits;
-        thisZ = z(:,iUnit);
-        [P(iUnit,:,iLag),MI(iUnit,iLag)] =...
-            getCondProbAndMI(thisZ,x(:),edgevector,Nxbins);
-       
-        %%% parfor---or something??
-        for iShuffle = 1:Nreshuffles
-            [~,bbb] = sort(rand(length(thisZ),1));
-            thisZshuffled = thisZ(bbb);
-            [~,MIshuffled(iShuffle)] =...
-                getCondProbAndMI(thisZshuffled,x(:),edgevector,Nxbins);
-        end
-        thr(iUnit,iLag) = quantile(MIshuffled,pvalue);
+    
+    % Pr(Z=1|X), I(Z;X)
+    [P(:,:,iLag), MI(:,iLag)] = getPrAis1givenB(z,x(:),edgevector);
+    
+    % I(Zshuffled;X), shuffle over time, to get significance thresholds
+    for iShuffle = 1:Nreshuffles
+        [~,randomizedInds] = sort(rand(size(z)));
+        randomizedInds = randomizedInds + ((1:Nunits)-1)*size(z,1);
+        zShuffled = z(randomizedInds);
+        [~,MIshuffled(iShuffle,:)] = getPrAis1givenB(zShuffled,x(:),edgevector);
     end
+    thr(:,iLag) = quantile(MIshuffled,pvalue);
+    
     fprintf('.');
 end
 fprintf('\n');
 toc
 
-
 % get the MI-maximizing lag, and the MI(Z;X) and P(Z=1|X) at these lags
 MI = MI.*(MI>thr);              % kill MI below the threshold
 [maxMI,indMax] = max(MI,[],2);
 tausOpt = lagvector(indMax);
-Ptau = arrayfun(@(iUnit)(P(iUnit,:,indMax(iUnit))),1:Nunits,...
-    'UniformOutput',false);
-Ptau = cat(1,Ptau{:});    
-Pmax = squeeze(max(P,[],2));    % max_x [P(Z_t=1|X_{t-tau})], all tau,units
+
+Ptau = arrayfun(@(iUnit)(P(:,iUnit,indMax(iUnit))),1:Nunits,'UniformOutput',false);
+Ptau = cat(2,Ptau{:})';
+Pmax = squeeze(max(P));         % max_x [P(Z_t=1|X_{t-tau})], all tau,units
 
 %  figure(7); clf; imagesc(P'); pause() %%% cf. Fig. 2C in Mulliken2008
 [~,bbb] = sort(tausOpt);
 figure(5346); clf; 
-imagesc(bsxfun(@rdivide,MI(bbb,:),max(MI(bbb,:),[],2))); 
+imagesc(MI(bbb,:)./max(MI(bbb,:),[],2)); 
 axis xy
 %%% cf. Fig. 3A in Mulliken2008.
 
@@ -102,71 +102,6 @@ axis xy
 
 end
 %-------------------------------------------------------------------------%
-%-------------------------------------------------------------------------%
-
-
-
-%-------------------------------------------------------------------------%
-function edgevector = getEdgeVector(X,Nxbins,params)
-
-limittype = '3STD';
-% limittype = 'PARAMS';
-fprintf('\n\nHey!! Getting limits with method %s!!\n\n\n',limittype);
-
-switch limittype
-    case 'PARAMS'
-        N = params.N;
-        NSmin = params.smin(1,strcmp(params.NS,params.mods));
-        NSmax = params.smax(1,strcmp(params.NS,params.mods));
-        Xmin = NSmin;
-        Xmax = N/(N-1)*(NSmax - NSmin) + NSmin;
-        edgevector = linspace(Xmin,Xmax,Nxbins+1);
-    case '3STD'
-        Xmin = -3*sqrt(var(X(:)));
-        Xmax = 3*sqrt(var(X(:)));
-        if min(X(:)) > Xmin, Xmin = min(X(:)) + eps; end
-        if max(X(:)) < Xmax, Xmax = max(X(:)) - eps; end
-        edgevector = linspace(Xmin,Xmax,Nxbins+1-2); % -2 b/c of infs below
-        edgevector = [-inf edgevector inf];
-    case 'MINMAX'
-        Xmin = min(X(:)) + eps;
-        Xmax = max(X(:)) - eps;
-        edgevector = linspace(Xmin,Xmax,Nxbins+1-2); % -2 b/c of infs below
-        edgevector = [-inf edgevector inf];
-end
-
-end
-%-------------------------------------------------------------------------%
-
-
-%-------------------------------------------------------------------------%
-function [P,MI] = getCondProbAndMI(z,x,edgevector,Nxbins)
-
-
-% Ns
-Nsamples = length(z);
-
-% marginal distribution over Z
-pofZ = [1-sum(z)/Nsamples; sum(z)/Nsamples];
-
-% marginal distribution over X
-[Nx,xbins] = histc(x,edgevector);
-pofX = Nx(1:Nxbins)/Nsamples + eps;  %%% just in case
-
-% joint distribution
-Zincidence = [1-z, z];
-Xincidence = sparse(1:Nsamples,xbins,1,Nsamples,Nxbins);
-pofXandZ = Zincidence'*Xincidence/Nsamples;
-
-% mutual information
-pofXandZ(pofXandZ==0) = pofXandZ(pofXandZ==0) + eps;
-MI = sum(sum(pofXandZ.*(log2(pofXandZ) - log2(pofZ*pofX'))));
-
-% Pr(z|x) for this lag
-pofZgivenX = bsxfun(@mrdivide,pofXandZ,pofX');
-P = pofZgivenX(2,:);  % i.e, just P(Z=1|X)
-
-end
 %-------------------------------------------------------------------------%
 
 
@@ -226,27 +161,3 @@ end
 
 end
 %-------------------------------------------------------------------------%
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

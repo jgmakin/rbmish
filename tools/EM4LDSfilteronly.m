@@ -1,23 +1,28 @@
-function LDSparams = EM4LDSfilteronly(Nstates,Ninputs,T,params,varargin)
-% Expectation-maximization for the Kalman filter
+function LDSparams = EM4LDSfilteronly(Nstates,params,varargin)
+% EM *without smoothing* for an LTI system w/Gaussian noise
 %
-% USAGE: LDSparams = EM4KF(T,params,learningtype)
+% USAGE:
+%   LDSparams = EM4KF(Nstates,params);
+%   LDSparams = EM4KF(Nstates,params,'params',LDSparams,'data',LDSdata);
 %
 % This function learns the Kalman filter parameters using
 % expectation-maximization.  Currently, it runs in "batch" fashion, using
 % Ncases copies of the trajectories to train on before updating the
 % parameters.
 
-
-%%% It doesn't *really* make sense, in general, to plot the hidden states,
-%%% since you're really just guessing that the first two states are
-%%% important.
-
-
 %-------------------------------------------------------------------------%
+% Revised: 08/26/16
+%   -freshly copied over from EM4LDS.m, then edited to again elimate RTS
+%   smoother
+% Revised: 08/17/15
+%   -large revision: rewrote to accommodate LDSdata that has 
+%   variable-length trajectories (and hence is an array structure rather
+%   than a structure of tensors)
+% Revised: 08/26/14
+%   -eliminated "noisily observed controls"
 % Revised: 04/01/14
-%   -forced the inference algorithms to use prestored SigmaV and
-%   SigmaY---if they exist
+%   -forced the inference algorithms to use prestored SigmaV & SigmaYX---if
+%   they exist
 %   -added plotting function for log-likelihoods
 %   -added log likelihood (negative cross entropy) for p(v)
 % Revised: 03/10/14
@@ -39,159 +44,98 @@ function LDSparams = EM4LDSfilteronly(Nstates,Ninputs,T,params,varargin)
 
 
 % Ns
-Ndims = params.Ndims;
-Ncases = params.Ncases;
-maxepochs = 90;
+NepochsMax = params.NepochsMax;
+DIAGCOVS = 0;
 TOPLOT = 0;
+Ntest = 5;
+thr = 0.0005;	% 1/20 of a percent
+
+% variable arguments
+iParams = find(strcmp(varargin,'params'));
+iData = find(strcmp(varargin,'data'));
+iDiag = find(strcmp(varargin,'diagonal covariances'));
+if ~isempty(iDiag), DIAGCOVS = varargin{iDiag+1}; end
 
 % prepare figure
 if TOPLOT
-    [subplotHandleY,dataplotHandleY] = prepareFigure(1,Ndims,3);
+    fignum = 456;
+    [subplotHandleY,dataplotHandleY] = prepareFigure(fignum,...
+        size(params.dynamics.C,1),3);
     % ppp = rank(LDSparams.C);
     %%% just look at as many states as you can pick up from Y
     % [subplotHandleX,dataplotHandleX] = prepareFigure(2,ppp,3);
+    figureInfo.num = fignum;
+    figureInfo.subplotHandle = subplotHandleY;
+    figureInfo.dataplotHandle = dataplotHandleY;
+else
+    figureInfo = [];
 end
-[subplotHandleLL,dataplotHandleLL] = prepareFigure(34,1,2);
-
-% malloc
-xpctX = zeros(Ncases,Nstates,T);
-xpctU = zeros(Ncases,Ninputs,T);
-aLLy = zeros(1,maxepochs);
-aLLv = zeros(1,maxepochs);
+[subplotHandleLL,dataplotHandleLL] = prepareFigure(34,1,1);
 
 
 % loop through epochs....
-for epoch = 1:maxepochs
+for iEpoch = 1:NepochsMax
     
-    % generate fresh data
-    if mod(epoch,5)==1
-        LDSdata = getLDSdata(T,params);
-        Y = LDSdata.Y;
-        V = LDSdata.V;
-    end
-    
-    % initialize model params
-    if epoch==1
-        if isempty(varargin)
-            LDSparams = initLDSparams(Nstates,Ninputs,LDSdata);
+    %------------------- DATA GENERATION/INITIALIZATION ------------------%
+    % every Ntest epochs...
+    if mod(iEpoch,Ntest)==1
+        
+        if isempty(iData)
+            trajs = getLDStrajs(params);
         else
-            LDSparams = varargin{1};
+            trajs = varargin{iData+1};
         end
-        aLLold = -Inf;
-    end
-    
-    % init cumulative sums
-    CUMcvrnX = 0; CUMCvrnXfXp = 0; CUMcvrnU = 0; CUMCvrnXfUp = 0;
-    CUMCvrnXpUp = 0; LLy = 0; LLv = 0;
-    
-    %------------------------------- E STEP ------------------------------%
-    % loop through trajectories
-    for iCase = 1:Ncases
         
-        % emissions for this trajectory
-        y(1:Ndims,1:T) = squeeze(Y(iCase,:,:,:));
-        if isfield(LDSdata,'SigmaY')
-            %%% just tell it what the emission variances are
-            LDSparams.SigmaY(1:Ndims,1:Ndims,1:T) =...
-                squeeze(LDSdata.SigmaY(iCase,:,:,1,:));
-        end
-        if Ninputs>0
-            LDSparams.V(1:Ndims,1:T) = squeeze(V(iCase,:,:,:)); 
-            if isfield(LDSdata,'SigmaV')
-                %%% just tell it what the emission variances are
-                LDSparams.SigmaV(1:Ndims,1:Ndims,1:T) =...
-                    squeeze(LDSdata.SigmaV(iCase,:,:,1,:));
+        % initialize model params
+        if iEpoch==1
+            if isempty(iParams)
+                LDSparams = initLDSparams(trajs,Nstates,params.dynamics);
+            else
+                LDSparams = varargin{iParams+1};
             end
-        end
-        %%% at the moment, none of the "adjusters" is employed (see
-        %%% KF4PPC.m), which are required for bouncing, etc.
-        
-        % run filter, smoother
-        KFdstrbs = KalmanFilter(LDSparams,y);
-        %%%%%%%
-        for t = 1:(T-1)
-            Pt = KFdstrbs.CVRNMU(:,:,t);
-            Jt = Pt*LDSparams.A'*KFdstrbs.INFOTU(:,:,t+1);
-            XfXpCVRN(:,:,t) = KFdstrbs.CVRNMU(:,:,t+1)*Jt';            
-            RTSSdstrbs.XfXpCVRN(:,:,t) =...
-                Pt + Jt*XfXpCVRN(:,:,t) - Jt*LDSparams.A*Pt;
-        end        
-        RTSSdstrbs.XHAT = KFdstrbs.XHATMU;
-        RTSSdstrbs.XCVRN = KFdstrbs.CVRNMU;
-        %%%%%%%
+            XNtrpYold = -Inf;
             
-        % plot
-        if TOPLOT
-            % the only thing you can really test: outputs!!
-            shatKF = LDSparams.C*KFdstrbs.XHATMU;
-            shatRTSS = LDSparams.C*RTSSdstrbs.XHAT;
-            
-            % now write to the plot
-            animatePlot(1,subplotHandleY,dataplotHandleY,1:T,y,shatKF,shatRTSS);
-            % animatePlot(2,subplotHandleX,dataplotHandleX,1:T,zeros(ppp,T),... % x(1:ppp,:),...
-            %     XhatKF(1:ppp,:),RTSSdstrbs.XHAT(1:ppp,:));
-            pause();
-        end
-        
-        % accumulate
-        xpctX(iCase,:,:) = RTSSdstrbs.XHAT;
-        CUMcvrnX = CUMcvrnX + RTSSdstrbs.XCVRN;
-        CUMCvrnXfXp = CUMCvrnXfXp + RTSSdstrbs.XfXpCVRN;
-        LLy = LLy - KFdstrbs.XNtrpY;
-        if Ninputs>0
-            fprintf('.');
-            xpctU(iCase,:,:) = RTSSdstrbs.UHAT;
-            CUMcvrnU = CUMcvrnU + RTSSdstrbs.UCVRN;
-            CUMCvrnXfUp = CUMCvrnXfUp + RTSSdstrbs.XfUpCVRN;
-            CUMCvrnXpUp = CUMCvrnXpUp + RTSSdstrbs.XpUpCVRN;
-            LLv = LLv - KFdstrbs.XNtrpV;
+            % malloc
+            XNtrpY = zeros(1,NepochsMax,'like',trajs(1).Y); 
         end
     end
-    aLLy(epoch) = LLy/Ncases;
-    aLLv(epoch) = LLv/Ncases;
-    
-    
-    % gather expected statistics
-    xpctStats.xpctX = xpctX;
-    xpctStats.AvgCvrnX = CUMcvrnX/Ncases;
-    xpctStats.AvgCvrnXfXp = CUMCvrnXfXp/Ncases;
-    if Ninputs>0
-        xpctStats.xpctU = xpctU;
-        xpctStats.AvgCvrnU = CUMcvrnU/Ncases;
-        xpctStats.AvgCvrnXfUp = CUMCvrnXfUp/Ncases;
-        xpctStats.AvgCvrnXpUp = CUMCvrnXpUp/Ncases;
-    end
-    
-    % turn into (more) minimal sufficient stats
-    xpctT = gatherXpctSuffStats(xpctStats,Y,V);
     %---------------------------------------------------------------------%
     
     
-    % quit if you've converged in average log likelihood
-    aLL = aLLy(epoch); % + aLLv;
-    fractionalImprovement = (aLL - aLLold)/abs(aLLold);
-    aLLold = aLL;
-    fprintf('average LLy = %f, LLv = %f on EM epoch %i\n',...
-        aLLy(epoch),aLLv(epoch),epoch);
-    animatePlot(34,subplotHandleLL,dataplotHandleLL,1:epoch,...
-        aLLy(1:epoch),aLLv(1:epoch));
+    %------------------------------- E STEP ------------------------------%
+    [xpctT,XNtrpY(iEpoch)] = Estep4LDS(trajs,LDSparams,figureInfo);
+    % if strcmp(pLDSparams.meta, 'RandInitWithEC')
+    %%%% broken: you need somehow to pull out separate C and H....
+    %     xpctT = enforceNoisilyObservedControls(xpctT,C,H,pLDSparams.T);
+    % end
+    %---------------------------------------------------------------------%
     
-    thr = 0.0005; % 0.005;   % half a percent
-    if fractionalImprovement < thr   
-        fprintf('exiting with delta LL below tolerance\n');
+    
+    %------------------------ CHECK FOR CONVERGENCE ----------------------%
+    % quit if you've converged in average log likelihood
+    XNtrpYnew = XNtrpY(iEpoch);
+    fractionalImprovement = (XNtrpYold - XNtrpYnew)/abs(XNtrpYold);
+    XNtrpYold = XNtrpYnew;
+    fprintf('average cross entropy = %f on EM epoch %i\n',XNtrpYnew,iEpoch);
+	if usejava('desktop')
+    	animatePlot(34,subplotHandleLL,dataplotHandleLL,2:iEpoch,XNtrpY(2:iEpoch));
+    end
+    if (fractionalImprovement < thr) && (mod(iEpoch,Ntest)~=1)
+        fprintf('exiting with delta cross entropy below tolerance\n');
         break
     end
+    %---------------------------------------------------------------------%
     
     
     %----------------------------- M STEP --------------------------------%
-    LDSparams = getMLparams(xpctT,LDSparams);
+    LDSparams = ML4LDS(xpctT,LDSparams,'diagonal covariances',DIAGCOVS);
     %---------------------------------------------------------------------%
     
     
 end
 
-LDSparams.LL = aLL;
-fprintf('average LL = %f on EM epoch %i\n',aLL,epoch);
+LDSparams.LL = -XNtrpYnew;
+fprintf('average cross entropy = %f on EM epoch %i\n',XNtrpYnew,iEpoch);
 
 end
 %-------------------------------------------------------------------------%
@@ -200,112 +144,118 @@ end
 
 
 %-------------------------------------------------------------------------%
-function LDSparams = initLDSparams(Nstates,Ninputs,LDSdata)
+function LDSparams = initLDSparams(trajs,Nx,dynamics)
+
+% unload
+Ntrajs = length(trajs);
+Y0 = arrayfun(@(iCase)(trajs(iCase).Y(:,1)),1:Ntrajs,'UniformOutput',0);
+Y0 = cat(2,Y0{:});
+Ybroad = cat(2,trajs(:).Y);
+Ny = size(Ybroad,1);
+if isfield(trajs,'U'), Ubroad = cat(2,trajs(:).U); Nu = size(Ubroad,1); end
+Ts = arrayfun(@(iCase)(size(trajs(iCase).Y,2)),1:Ntrajs);
+if all(Ts == Ts(1)), T = Ts(1); else T = 'variable'; end
 
 
-% unload structure
-Y = LDSdata.Y;
-
-% Ns
-[Ncases,Ndims,Nmods,T] = size(Y);
-Y0 = Y(:,:,:,1)';
-Ybroad = longdata(Y)';
-
-% initialize C using PCA (assumes no output noise)
-C = estimateOutputMatrix(Nstates,Ybroad);
-LDSparams.C = C;
-LDSparams.C = randn(Ndims,Nstates); % [1 0]; overwrite with randomness
-
-% for controlled systems, init H, SigmaV, muV, and prior over U
-if Ninputs>0
+switch dynamics.meta
     
-    Vbroad = longdata(LDSdata.V)';
-    H = estimateOutputMatrix(Ninputs,Vbroad);
-    LDSparams.H = H;
-    LDSparams.H = randn(Ninputs,Ndims); % 1; overwrite with randomness
-       
-    % make the control-observation noise small [wrt what??]
-    % foo = randn(Ndims);                         % random (/100?)
-    % LDSparams.SigmaV = foo'*foo;
-    %%% alternatively, for systems with nonconstant covariance, you could
-    %%% just give these params to the filter: 
-    %%% LDSparams.SigmaV(1:Ndims,1:Ndims,1:T) = squeeze(LDSdata.SigmaV(1,:,:,:,:));
-
+    %%% this still only works with equal-length trajectories
+    case 'withData'
         
-    % intialize prior over U based on (initial) H
-    foo = randn(Ninputs)/100;                   % small & random
-    LDSparams.InfoU = pinv(cov((pinv(H)*Vbroad)')) + foo'*foo; % invertible!
-    LDSparams.muU = mean(pinv(H)*Vbroad,2);    
-    foo = randn(Ninputs);                       % overwrite with randomness
-    LDSparams.InfoU = foo'*foo/1000; % 3.656e2;
-    LDSparams.muU =  randn(Ninputs,1); % -0.001754435768020;
+        % initialize C using PCA (assumes no output noise)
+        C = estimateOutputMatrix(Nx,Ybroad);
+        LDSparams.C = C;
+        
+        % for building A, you'll need data that have as much rank as Nx
+        xfakeshort = shortdata(Ntrajs,3,(pinv(C)*Ybroad)');
+        xfakeshort = xfakeshort(:,1:rank(C),:);
+        Xd = xfakeshort;
+        while rank(longdata(xfakeshort)) < Nx %%% <= Nx
+            Xd = diff(Xd,[],3);
+            xfakeshort = cat(2,xfakeshort(:,:,1:end-1),Xd);
+        end
+        
+        % init A based on data inferred via (initial) C
+        xfakef = longdata(xfakeshort(:,:,2:end))';
+        if isfield(trajs,'U')
+            U = shortdata(Ntrajs,3,Ubroad);
+            xfakep = [longdata(xfakeshort(:,:,1:end-1))';...
+                longdata(U(:,:,1:end-1))';...
+                ones(1,(size(xfakeshort,3)-1)*Ntrajs,'like',Ybroad)];
+            betaTRANS = (xfakef*xfakep')/(xfakep*xfakep');
+            LDSparams.A = betaTRANS(:,1:Nx) +...
+                randn(Nx)/50;
+            LDSparams.B = betaTRANS(:,(Nx+1):(Nx+Nu)) +...
+                randn(Nx,Nu)/50;
+        else
+            xfakep = [longdata(xfakeshort(:,:,1:end-1))';...
+                ones(1,(size(xfakeshort,3)-1)*Ntrajs,'like',Ybroad)];
+            betaTRANS = (xfakef*xfakep')/(xfakep*xfakep');
+            LDSparams.A = betaTRANS(:,1:end-1);
+        end
+        LDSparams.muX = betaTRANS(:,end);
+        LDSparams.SigmaX = (xfakef*xfakef') - betaTRANS*(xfakep*xfakef');
+        
+        % init ICs based on initial observations
+        foo = randn(Nx,Nx,'like',Ybroad)/1000;         % small & random
+        LDSparams.Info0 = pinv(cov((pinv(C)*Y0)')) + foo'*foo; % so it's invertible!
+        LDSparams.mu0 = mean(pinv(C)*Y0,2);
+        
+        % tell ML4LDS that muX may be nonzero (see NOTE below)
+        %%%
+        LDSparams.muX = zeros(Nx,1,'like',Ybroad);
+        LDSparams.muYX = zeros(Ny,1,'like',Ybroad);
+        %%%
+        
+        % make the output and transition noises small [wrt what??]
+        foo = randn(Ny,'like',Ybroad)/10;
+        LDSparams.SigmaYX = foo'*foo;
+        %%% NB: this will be overwritten if LDSdata has a field SigmaYX
+
+
+    case 'random'
+        
+        LDSparams.A = randn(Nx,Nx,'like',Ybroad);
+        if isfield(trajs,'U'), LDSparams.B = randn(Nx,Nu,'like',Ybroad); end
+        foo = randn(Nx,Nx,'like',Ybroad);
+        LDSparams.SigmaX = foo'*foo; % 1.0e-05*[0.5 0; 0 0.5];
+        LDSparams.muX = randn(Nx,1,'like',Ybroad); % [0;0];
+        LDSparams.C = randn(Ny,Nx,'like',Ybroad); % [1 0];
+        foo = randn(Nx,Nx,'like',Ybroad);
+        LDSparams.Info0 = foo'*foo; % inv([0.0030 0; 0 0.1000]);
+        LDSparams.mu0 = randn(Nx,1,'like',Ybroad); % [1.0236; 2.5];
+        if Ny > Nx, LDSparams.muYX = randn(Ny,1,'like',Ybroad); end
+        
+        % make the output and transition noises small [wrt what??]
+        foo = randn(Ny,'like',Ybroad)/10;
+        LDSparams.SigmaYX = foo'*foo;
+        %%% NB: this will be overwritten if LDSdata has a field SigmaYX
+
+   
+    case 'FactorAnalysis'
+
+        fprintf('Initializing LDS with factor analysis\n');
+        [LDSparams.C,bhat,LDSparams.SigmaYX,What] = FactorAnalysis(Ybroad,Nx);
+        Xhat = What*(Ybroad - bhat);
+        
+        Y = shortdata(Ntrajs,3,(Ybroad - bhat)');
+        Z = shortdata(Ntrajs,3,Xhat');
+        LDSparams = learnfullyobservedLDS(Y,Z);
+        %%%%
+        % But this will find a LDSparams.SigmaYX that is tiny!!!!
+        %%%%
+
+        if Ntrajs < length(LDSparams.mu0)
+            LDSparams.mu0 = mean(Xhat,2);
+            LDSparams.Info0 = inv(cov(Xhat')');
+        end
+
 end
-
-
-% for building A, you'll need data that have as much rank as Nstates
-xfakeshort = shortdata(Ncases,4,(pinv(C)*Ybroad)');
-xfakeshort = xfakeshort(:,1:rank(C),:,:);
-Xd = xfakeshort;
-while rank(longdata(xfakeshort)) < Nstates
-    % Xd = Xd(:,:,:,2:end);
-    Xd = diff(Xd,[],4);
-    xfakeshort = cat(2,xfakeshort(:,:,:,1:end-1),Xd);
-end
-% xfakeshort = shortdata(Ncases,3,(pinv(C)*Ybroad)');
-
-% init A based on data inferred via (initial) C (and H if controlled)
-xfakef = longdata(xfakeshort(:,:,:,2:end))';
-if Ninputs > 0
-    ufakep = pinv(H)*longdata(LDSdata.V(:,:,:,1:(size(xfakeshort,4)-1)))';
-    xfakep = [longdata(xfakeshort(:,:,:,1:end-1))'; ufakep;...
-        ones(1,(size(xfakeshort,4)-1)*size(xfakeshort,1))];
-    
-    betaTRANS = (xfakef*xfakep')/(xfakep*xfakep');
-    LDSparams.A = betaTRANS(:,1:Nstates) + randn(Nstates)/50;
-    LDSparams.B = betaTRANS(:,(Nstates+1):(Nstates+Ninputs)) + randn(Nstates,Ninputs)/50;
-    LDSparams.A = randn(Nstates,Nstates);       % overwrite with randomness
-    LDSparams.B = randn(Nstates,Ninputs);       % [0; 1];
-else
-    xfakep = [longdata(xfakeshort(:,:,:,1:end-1))';...
-        ones(1,(size(xfakeshort,4)-1)*size(xfakeshort,1))];
-    betaTRANS = (xfakef*xfakep')/(xfakep*xfakep');
-    LDSparams.A = betaTRANS(:,1:end-1);
-    LDSparams.A = randn(Nstates,Nstates);       % overwrite with randomness
-end
-LDSparams.muX = betaTRANS(:,end);
-LDSparams.SigmaX = (xfakef*xfakef') - betaTRANS*(xfakep*xfakef');
-foo = randn(Nstates,Nstates);
-LDSparams.SigmaX = foo'*foo; % 1.0e-05*[0.5 0; 0 0.5];
-LDSparams.muX = randn(Nstates,1); % [0;0];      % overwrite with randomness
-
-% tell getMLparams that muX may be nonzero (see NOTE below)
-% LDSparams.muX = zeros(Nstates,1);
-% LDSparams.muY = zeros(Ndims,1);
-
-% intialize state 0 based on (initial) C
-foo = randn(Nstates)/1000;                      % small & random
-LDSparams.Info0 = pinv(cov((pinv(C)*Y0)')) + foo'*foo; % so it's invertible!
-LDSparams.mu0 = mean(pinv(C)*Y0,2);
-foo = randn(Nstates,Nstates);
-LDSparams.Info0 = foo'*foo; % inv([0.0030 0; 0 0.1000]);
-LDSparams.mu0 = randn(Nstates,1); % [1.0236; 2.5];overwrite with randomness
-
-
-% make the output and transition noises small [wrt what??]
-% foo = randn(Ndims)/1000;                          % small & random
-% LDSparams.SigmaY = foo'*foo;
-%%% alternatively, for systems with nonconstant covariance, you could just
-%%% give this param to the filter:
-%%% LDSparams.SigmaY(1:Ndims,1:Ndims,1:T) = squeeze(LDSdata.SigmaY(1,:,:,:,:));
-
-
 
 LDSparams.T = T;
 
-
 end
 %-------------------------------------------------------------------------%
-
 
 %-------------------------------------------------------------------------%
 function P = estimateOutputMatrix(Ncols,Y)
@@ -318,18 +268,17 @@ NpcsMAX = 10;
 %%% you could really use a better criterion for max num pcs than just 10.
 
 % Npcs <= Nrows, Npcs <= Ncols, Npcs <= NpcsMAX
-Npcs = min([NpcsMAX,Nrows,Ncols]);  
+Npcs = min([NpcsMAX,Nrows,Ncols]);
 
 % how many meaningful dimensions are there in Y?
 [V,D] = eig(cov(Y'));
-[maxima,indices] = sort(diag(D),'descend');     % sort by eigenvalue
+[~,indices] = sort(diag(D),'descend');          % sort by eigenvalue
 W = V(:,indices(1:Npcs));                       % select 1st Npcs PCs
-P = zeros(Nrows,Ncols);                         % a P that does nothing
+P = zeros(Nrows,Ncols,'like',Y);                % a P that does nothing
 P(:,1:Npcs) = W;                                % the useful part of P
 
 end
 %-------------------------------------------------------------------------%
-
 
 %-------------------------------------------------------------------------%
 function [subplotHandle,dataplotHandle] = prepareFigure(fignum,Ndims,Ndatavecs)
@@ -346,25 +295,144 @@ end
 end
 %-------------------------------------------------------------------------%
 
+%-------------------------------------------------------------------------%
+function [xpctT,XNtrpY] = Estep4LDS(trajs,LDSparams,figureInfo)
+
+% booleans
+BIASEDTRANSITIONS = 1;
+BIASEDEMISSIONS = diff(size(LDSparams.C)) < 0; %%% see notes below
+
+% Ns
+Ntrajs = length(trajs);
+Nstates = size(LDSparams.A,1);
+
+% init
+mucov2op = @(muA,muB,Sgm)(muA*muB' + sum(Sgm,3));
+if isfield(trajs,'U')
+    KFfunc = @(i,KFparams)(KalmanFilter(KFparams,trajs(i).Y,...
+        'controls',trajs(i).U));
+else
+    KFfunc = @(i,KFparams)(KalmanFilter(KFparams,trajs(i).Y));
+end
+if ~isfield(trajs,'SigmaYX')
+    [trajs(1:Ntrajs).SigmaYX] = deal(LDSparams.SigmaYX);
+end
+muX0 = 0; muXp = 0; muXf = 0; muX = 0; muYX = 0; XNtrpY = 0;
+X0X0 = 0; XpXp = 0; XfXf = 0; XfXp = 0; XX = 0; YX = 0; YY = 0;
+Nsamples = 0;
+
+% loop through cases
+for iTraj = 1:Ntrajs
+    
+    Nsamples = Nsamples + size(trajs(iTraj).Y,2);
+    
+    % filter
+    LDSparams.SigmaYX = trajs(iTraj).SigmaYX;
+    LDSparams.T = size(trajs(iTraj).Y,2);
+    filtered = KFfunc(iTraj,LDSparams);
+    
+    
+    % Approximate:
+    %   Cov[X_{t+1},X_t| y_0,...,y_T] \approx Cov[X_{t+1},X_t| y_0,...,y_t] 
+    %                                       = A*Cov[X_t|y_0,...,y_t]
+    smoothed.XfXpCVRN = tensorOp(repmat(LDSparams.A,[1,1,LDSparams.T]),...
+        filtered.CVRNMU);
+    % WTF??  This appears totally wrong:
+    %     % fake smoother
+    %     for t = 1:(size(trajs(iTraj).Y,2)-1)
+    %         Pt = filtered.CVRNMU(:,:,t);
+    %         Jt = Pt*LDSparams.A'*filtered.INFOTU(:,:,t+1);
+    %         XfXpCVRN = filtered.CVRNMU(:,:,t+1)*Jt'; %%% this is the approx.
+    %         smoothed.XfXpCVRN(:,:,t) = Pt + Jt*XfXpCVRN - Jt*LDSparams.A*Pt;
+    %         keyboard
+    %     end
+    
+    
+    smoothed.XHAT = filtered.XHATMU;
+    smoothed.XCVRN = filtered.CVRNMU;
+    
+    
+    % gather expected sufficient statistics
+    % first-order
+    muX0 = muX0 + smoothed.XHAT(:,1);
+    muXp = muXp + sum(smoothed.XHAT(:,1:end-1),2);
+    muXf = muXf + sum(smoothed.XHAT(:,2:end),2);
+    muX  = muX  + sum(smoothed.XHAT,2);
+    muYX  = muYX  + sum(trajs(iTraj).Y,2);
+    
+    % second-order
+    X0X0 = X0X0 + mucov2op(smoothed.XHAT(:,1),smoothed.XHAT(:,1),smoothed.XCVRN(:,:,1));
+    XpXp = XpXp + mucov2op(smoothed.XHAT(:,1:end-1),smoothed.XHAT(:,1:end-1),smoothed.XCVRN(:,:,1:end-1));
+    XfXf = XfXf + mucov2op(smoothed.XHAT(:,2:end),smoothed.XHAT(:,2:end),smoothed.XCVRN(:,:,2:end));
+    XfXp = XfXp + mucov2op(smoothed.XHAT(:,2:end),smoothed.XHAT(:,1:end-1),smoothed.XfXpCVRN);
+    XX = XX + mucov2op(smoothed.XHAT,smoothed.XHAT,smoothed.XCVRN);
+    YX = YX + mucov2op(trajs(iTraj).Y,smoothed.XHAT,0);
+    YY = YY + mucov2op(trajs(iTraj).Y,trajs(iTraj).Y,0);
+    
+    % (average) log likelihood
+    XNtrpY = XNtrpY + filtered.XNtrpY;
+    
+    if ~isempty(figureInfo)&&(iTraj==1)
+        shatKF = LDSparams.C*filtered.XHATMU;
+        shatRTSS = LDSparams.C*smoothed.XHAT;
+        y = trajs(iTraj).Y;
+        
+        % now write to the plot
+        %%%%% hardcoded fignum = 1
+        animatePlot(figureInfo.num,figureInfo.subplotHandle,...
+            figureInfo.dataplotHandle,1:size(y,2),y,shatKF,shatRTSS);
+        % animatePlot(2,subplotHandleX,dataplotHandleX,1:T,zeros(ppp,T),... % x(1:ppp,:),...
+        %     XhatKF(1:ppp,:),RTSSdstrbs.XHAT(1:ppp,:));
+        % keyboard
+        % pause();
+        % end
+    end
+end
+
+
+% now renormalize by the number of samples in each
+XNtrpY = XNtrpY/Ntrajs;
+xpctT.mu0 = muX0/Ntrajs;
+xpctT.x0x0 = X0X0/Ntrajs;
+xpctT.XpXp = XpXp/(Nsamples-Ntrajs);
+xpctT.XfXf = XfXf/(Nsamples-Ntrajs);
+xpctT.XfXp = XfXp/(Nsamples-Ntrajs);
+if BIASEDTRANSITIONS
+    xpctT.XpXp = [xpctT.XpXp muXp/(Nsamples-Ntrajs); muXp'/(Nsamples-Ntrajs) 1];
+    xpctT.XfXp = [xpctT.XfXp muXf/(Nsamples-Ntrajs)];
+end
+xpctT.XX = XX/Nsamples;
+xpctT.YX = YX/Nsamples;
+xpctT.YY = YY/Nsamples;
+if BIASEDEMISSIONS
+    xpctT.XX = [xpctT.XX muX/Nsamples; muX'/Nsamples 1];
+    xpctT.YX = [xpctT.YX muYX/Nsamples];
+end
+
+
+
+end
+%-------------------------------------------------------------------------%
 
 %-------------------------------------------------------------------------%
 function animatePlot(fignum,subplotHandle,dataplotHandle,xdata,varargin)
 
 % params
-Ndatavecs = length(varargin);
+%%% Ndatavecs = length(varargin);
+[Ndims,Ndatavecs] = size(dataplotHandle);
 
 % pull up the current figure
 set(0,'CurrentFigure',figure(fignum))
-colors = 'krbcmy';      
+colors = 'krbcmy';
 %%% try not to use any more than that
 
 for ivec = 1:Ndatavecs
     
     ydata = varargin{ivec};
-    Ndims = size(ydata,1);
+    %%%Ndims = size(ydata,1);
     
-    for dim = 1:Ndims
-        set(dataplotHandle(dim,ivec),'XData',xdata,'YData',ydata(dim,:),...
+    for iDim = 1:Ndims
+        set(dataplotHandle(iDim,ivec),'XData',xdata,'YData',ydata(iDim,:),...
             'color',colors(ivec));
     end
 end
@@ -375,8 +443,12 @@ end
 %-------------------------------------------------------------------------%
 
 
+
+
 %-------------------------------------------------------------------------%
-function xpctT = gatherXpctSuffStats(xpctStats,Y,V)
+%-------------------------------------------------------------------------%
+% Retired (for now, at least)
+function xpctT = gatherXpctSuffStats(xpctStats,Y)
 % NB that the sufficient statistics are all in the form of *average*
 % (across time and cases) expected outer products, and of course that:
 %
@@ -387,33 +459,29 @@ function xpctT = gatherXpctSuffStats(xpctStats,Y,V)
 %   <E[X*y'|y]> = <E[X|y]Y'>
 
 
-
-%%% xpctX,AvgCvrnX,AvgCvrnXpXf,Y)
-
-
 %                   -------------NOTE--------------
-% There's a redundancy here.  A translation of Y (muY!=0) can always be
-% absorbed into a constant input to X, namely muX := (I-A)C'inv(CC')muY.
+% There's a redundancy here.  A translation of Y (muYX!=0) can usually be
+% absorbed into a constant input to X, namely muX := (I-A)C'inv(CC')muYX.
 % Proceeding backwards from the conclusion:
 %
-%       Z_{t+1} = A*Z_t + (I-A)*C'*inv(C*C')*muY
+%       Z_{t+1} = A*Z_t + (I-A)*C'*inv(C*C')*muYX
 %       Y_t = C*Z_t
-%   =>  Z_{t+1} = A*(Z_t - C'*inv(C*C')*muY) + C'*inv(C*C')*muY
-%   =>  Z_{t+1} - C'*inv(C*C')*muY = A*(Z_t - C'*inv(C*C')*muY)
-%   X := Z - C'*inv(C*C')*muY => 
+%   =>  Z_{t+1} = A*(Z_t - C'*inv(C*C')*muYX) + C'*inv(C*C')*muYX
+%   =>  Z_{t+1} - C'*inv(C*C')*muYX = A*(Z_t - C'*inv(C*C')*muYX)
+%   X := Z - C'*inv(C*C')*muYX =>
 %       X_{t+1} = A*X_t.
-%       Y_t = C*(X_t + C'*inv(C*C')*muY)
-%           = C*X_t + muY.
+%       Y_t = C*(X_t + C'*inv(C*C')*muYX)
+%           = C*X_t + muYX.
 %
 % NB: *But this assumes that C*C' is invertible* ("C is fat").
 %
-% Likewise, a constant input to X (muX!=0) can be absorbed into a 
-% translation of the emission Y, namely muY = C*inv(I-A)*muX:
-% 
+% Likewise, a constant input to X (muX!=0) can be absorbed into a
+% translation of the emission Y, namely muYX = C*inv(I-A)*muX:
+%
 %       X_{t+1} = A*X_t
 %       Y_t = C*X_t + C*inv(I-A)*muX
 %           = C*(X_t + inv(I-A)*muX)
-%   Z := X + inv(I-A)*muX => 
+%   Z := X + inv(I-A)*muX =>
 %           = C*Z_t
 %   =>  Z_{t+1} = X_{t+1} + inv(I-A)*muX
 %               = A*X_t + inv(I-A)*muX
@@ -421,37 +489,18 @@ function xpctT = gatherXpctSuffStats(xpctStats,Y,V)
 %               = A*Z_t + (I-A)*inv(I-A)*muX
 %               = A*Z_t + muX.
 %
-% But this assumes that (I-A) is invertible, which is much less likely!!  
+% But this assumes that (I-A) is invertible, which is much less likely!!
 % (It is not the case for your default dynamics, for example).  (You might
 % think you could pull a similar trick to the previous by using the
 % pseudoinverse of (I-A), but rank(Q*Q') = rank(Q) for real matrices.)
-% 
-% Something similar is true of the controls.  If H*H' is invertible, then
-% we can write muX = -B*H'*inv(H*H')*muV.  Then:
-%
-%       V_t = H*U_t
-%       Z_{t+1} = A*Z_t + B*U_t - B*H'*inv(H*H')*muV
-%               = A*Z_t + B*[U_t - H'*inv(H*H')*muV]
-%   UU_t := U_t - H'*inv(H*H')*muV =>
-%               = A*Z_t + B*UU_t
-%   =>  V_t = H*(UU_t + H'*inv(H*H')*muV)
-%           = H*UU_t + H*H'*inv(H*H')*muV
-%           = H*UU_t + muV.
-%
-% For you, H will generally be the identity, so H*H' will be invertible.
-% NB: if H is "tall" (the controls, or combinations thereof, appear
-% redundantly in V), then this will not work, and you need to allow a bias
-% muV!!
 %
 % Therefore, by default this function will assume that the only bias is on
 % the transitions.  ***HOWEVER***, you should check before using this that
 %
-% (1) rank(C*C') = Nstateobsv (won't be true, e.g., for neural array data)
-% (2) rank(H*H') = Nctrlobsvs
+% 	rank(C*C') = Nstateobsv (won't be true, e.g., for neural array data)
 %
-% When these are not satisfied you should allow offsets biases for Y and V.
+% When these are not satisfied you should allow offsets biases for Y.
 %                   ------------------------------
-
 
 
 % function
@@ -459,10 +508,7 @@ mucov2op = @(muA,muB,AvgSgm)(muA*muB'/size(muA,2) + AvgSgm);
 
 % FLAGS
 BIASEDTRANSITIONS = 1;  % isfield(LDSparams,'muX');
-BIASEDEMISSIONS = 0;    % isfield(LDSparams,'muY');
-BIASEDCTRLOBSVS = 0;    % isfield(LDSparams,'muV');
-CTRLD = isfield(xpctStats,'xpctU');
-
+BIASEDEMISSIONS = 0;    % isfield(LDSparams,'muYX');
 
 
 % sift out data for regression
@@ -478,34 +524,7 @@ AvgCvrnXpXp = mean(xpctStats.AvgCvrnX(:,:,1:end-1),3);
 AvgCvrnXfXf = mean(xpctStats.AvgCvrnX(:,:,2:end),3);
 AvgCvrnXfXp = mean(xpctStats.AvgCvrnXfXp,3);
 
-if CTRLD
-   
-    % sift out data
-    muUp = longdata(xpctStats.xpctU(:,:,1:end-1))';
-    muU = longdata(xpctStats.xpctU)';
-    AvgCvrnU = mean(xpctStats.AvgCvrnU,3);
-    AvgCvrnUpUp = mean(xpctStats.AvgCvrnU(:,:,1:end-1),3);
-    AvgCvrnXpUp = mean(xpctStats.AvgCvrnXpUp,3);
-    AvgCvrnXfUp = mean(xpctStats.AvgCvrnXfUp,3);
-    Vbroad = longdata(V)';
-    
-    % CONTROL/CONTROL OBSV. AVERAGE (over time) EXPECTED OUTER PRODUCTS
-    xpctT.UU = mucov2op(muU,muU,AvgCvrnU);
-    xpctT.VU = mucov2op(Vbroad,muU,0);
-    xpctT.VV = mucov2op(Vbroad,Vbroad,0);
-    xpctT.muU = mean(muU,2);
-    if BIASEDCTRLOBSVS
-        xpctT.UU = [xpctT.UU mean(muU,2); mean(muU,2)' 1];
-        xpctT.VU = [xpctT.VU mean(Vbroad,2)];
-    end
-    
-    % muXp -> [muXp; muUp]    
-    muXp = [muXp; muUp];
-    AvgCvrnXpXp = [AvgCvrnXpXp, AvgCvrnXpUp; AvgCvrnXpUp', AvgCvrnUpUp];
-    AvgCvrnXfXp = [AvgCvrnXfXp AvgCvrnXfUp];
-end
-
-
+%%%% if there's a (visible) control....
 
 % STATE/STATE AVERAGE EXPECTED OUTER PRODUCTS
 % ...over the first state
@@ -533,14 +552,3 @@ end
 
 end
 %-------------------------------------------------------------------------%
-
-
-
-
-
-
-
-
-
-
-

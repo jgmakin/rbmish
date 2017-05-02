@@ -1,19 +1,20 @@
-function LDSparams = learnfullyobservedLDS(LDSdata,varargin)
+function LDSparams = learnfullyobservedLDS(Y,X,varargin)
 % Just like it says: This version of the parameter estimator learns them
 % based on a fully observed model; i.e., it has access to the full
 % underlying state X.
+% 
+% USAGE:
+%    LDSparams = learnfullyobservedLDS(Y,X);
 %
-% Right now it learns using only one data set, i.e., 40 trajectories of
-% 1000 samples apiece.
 
 
 %%%%%%%%%%%%%%
 % NB: you need a flag to cover the following cases:
-%   (1) SigmaY is time varying (!?)
+%   (1) SigmaYX is time varying (!?)
 %   (2) regression with LOOCV
-%   (3) regression with regularization (but that's in linrgsLOOCV, too)
+%   (3) regression with regularization (but that's in linregress.m, too)
 %   (4) unbiased estimators?? (N-1 vs. N)
-% These will be a pain in the ass, b/c getMLparams is called in EM4KF.m as
+% These will be a pain in the ass, b/c ML4LDS is called in EM4KF.m as
 % well, and there it's a little more confusing how to compute
 % cross-validated parameters (you're working with expected sufficient stats
 % rather than actually samples of X...)
@@ -40,23 +41,19 @@ function LDSparams = learnfullyobservedLDS(LDSdata,varargin)
 %   by JGM
 %-------------------------------------------------------------------------%
 
-
-% unload structure
-Z = LDSdata.Z;
-Y = LDSdata.Y;
-
 % params
-[Ncases, Nstates, T] = size(Z);
+[Ncases, Nstates, T] = size(X);
 Nsamples = Ncases*T;
 NN = Nsamples - Ncases;
 LDSparams.T = T;
+altdims = defaulter('alternative dimensions',[],varargin{:});
 
 
-% sift out data for regressions (Z is a tensor: Ncases x Nstates x T)
-x00 = Z(:,:,1)';
-Xp = [longdata(Z(:,:,1:end-1))'; ones(1,NN)];
-Xf = longdata(Z(:,:,2:end))';
-X = [longdata(Z)'; ones(1,Nsamples)];
+% sift out data for regressions (X is a tensor: Ncases x Nstates x T)
+x00 = X(:,:,1)';
+Xp = [longdata(X(:,:,1:end-1))'; ones(1,NN)];
+Xf = longdata(X(:,:,2:end))';
+Xbroad = [longdata(X)'; ones(1,Nsamples)];
 Ybroad = longdata(Y)';
 
 %%%%%
@@ -73,26 +70,21 @@ t.x0x0 = x00*x00'/Ncases;                       % ...the first
 t.XpXp = Xp*Xp'/NN;                             % ...all but the last
 t.XfXp = Xf*Xp'/NN;                             % ...consecutive states
 t.XfXf = Xf*Xf'/NN;                             % ...all but the first
-t.XX = X*X'/Nsamples;                           % ...all states
-t.YX = Ybroad*X'/Nsamples;                      % ...states and emissions
+t.XX = Xbroad*Xbroad'/Nsamples;                 % ...all states
+t.YX = Ybroad*Xbroad'/Nsamples;                 % ...states and emissions
 t.YY = Ybroad*Ybroad'/Nsamples;                 % ...all emissions
 
-% tell getMLparams to expect non-zero-mean noise terms (since everything is
+% tell ML4LDS to expect non-zero-mean noise terms (since everything is
 % observed, these can't be redundant with each other...)
-LDSparams.muY = [];      LDSparams.muX = [];
+LDSparams.muYX = [];            LDSparams.muX = [];
 
-%%%%%
-if ~isempty(varargin)
-    Nx = varargin{1}; Ny = varargin{2}; Nu = varargin{3}; Nv = varargin{4};
-    dynamics.C = zeros(Ny,Nx);  dynamics.H = zeros(Nv,Nu);  dynamics.T = T;
-    t = enforceNoisilyObservedControls(t,dynamics);
+if ~isempty(altdims)
+    Nx = altdims(1); Ny = altdims(2); Nu = altdims(3); Nv = altdims(4);
+    t = enforceNoisilyObservedControls(t,zeros(Ny,Nx),zeros(Nv,Nu),T);
 end
-%%%%%
+
 
 % solve for the maximum-likelihood parameters (may be biased!)
-LDSparams = getMLparams(t,LDSparams);
-
-
+LDSparams = ML4LDS(t,LDSparams,varargin{:});
 
 end
-

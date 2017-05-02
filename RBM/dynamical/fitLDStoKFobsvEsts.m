@@ -43,17 +43,22 @@ function LDSparams = fitLDStoKFobsvEsts(LDSdataTest,model,params,varargin)
 %   by JGM
 %-------------------------------------------------------------------------%
 
+%%%%%
+% Currently broken because of the new KF4PPC and LDSdata.... (01/08/17)
+%%%%%
+
 % init
 Nepochs = 50;
 plotHandle = initPlots(2014);
 fignum = 4;
 figure(fignum); clf;
 EMBASED = isstruct(model);
-
+T = 1000;
+Ntraj = 40;
 
 % targets for *testing* data (fixed)
 YSTARtest = getKFtargets(model,LDSdataTest,EMBASED,params);
-
+if checkGPUavailability, dataclass = 'gpuArray'; else dataclass = 'double'; end
 
 % malloc
 MSE = zeros(Nepochs,1);
@@ -62,11 +67,11 @@ MSE = zeros(Nepochs,1);
 for iEpoch = 1:Nepochs
     
     % make new training data every epoch
-    LDSdataTrain = getLDSdata(params);
+    LDSdataTrain = getLDSdata(Ntraj,T,dataclass,params);
     if iEpoch==1
         if isstruct(varargin{1})
             LDSparams = varargin{1};
-            mass0 = 200;
+            mass0 = 96095; % 5000; % 200;
         else
             [LDSparams,mass0] = initLDSparams(class(LDSdataTrain.Y),...
                 varargin{1},params);
@@ -88,7 +93,7 @@ for iEpoch = 1:Nepochs
     drawnow
     
     % use posterior means from the rEFH to learn LDS parameters, w/BPTT
-    mAC = 1.06^iEpoch*mass0; % params.massUpdate(mass0,iEpoch);
+    mAC = 1.03^iEpoch*mass0; % params.massUpdate(mass0,iEpoch);
     LDSparams = BPTT4KF(YSTARtrain,LDSdataTrain,LDSparams,mAC);
     
 end
@@ -141,15 +146,14 @@ switch INITTYPE
         LDSparams.Info0 = [0 0; 0 2e9]; %%% foo'*foo;
         LDSparams.mu0 = zeros(Nx,1,yrclass); %%% randn(Nx,1,yrclass);
         %%%
-        LDSparams.T = params.dynamics.T;
         mass0 = 100;
     case 'true'     % LDS params of the system originally learned
-        LDSparams = getLDSparams(params,'true');
+        LDSparams = getLDSparams(params.dynamics);
         mass0 = 250;
     case 'EM2'      % LDS params learned by EM, second-order
-        load dynamical\finalwts\LDSparamsEM2ndOrd1DrEFHManyXprmts.mat
+        load([getdir('data'),'RBMish/EMparams/LDSOrd2_1D_LTI-PPC_ManyXprmts.mat'])
         LDSparams = Allparams(2);
-        mass0 = 150;
+        mass0 = 500;
     otherwise
         error('whoops')
 end
@@ -161,7 +165,7 @@ end
 %-------------------------------------------------------------------------%
 function MSE = getKFmirrorErr(LDSdata,YSTAR,LDSparams,fignum)
 
-LDSparams.SigmaY = LDSdata.SigmaY;
+LDSparams.SigmaYX = LDSdata.SigmaYX;
 pMirror = KF4PPC(LDSdata,LDSparams,'mirror');
 MSE = mean((pMirror.Xpct(:) - YSTAR(:)).^2);
 
@@ -197,35 +201,4 @@ YSTAR = pMODEL.Xpct;
 
 end
 %-------------------------------------------------------------------------%
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

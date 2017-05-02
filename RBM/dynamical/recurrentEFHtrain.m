@@ -1,124 +1,195 @@
-% LearnDynamics
+% recurrentEFHtrain
+%
 %   This script trains an "EFH filter" on data that encode a dynamical
 %   system.  The dynamics themselves are set in setDynamics.m.  Then it
 %   tests the trained network, with the classic test (error covariances
 %   across all trials) as well as several visualization tools.
+%
+%       The *runs* are repeats over the *same* model, whereas the "experiments"
+%       are repeats over (possibly) different models
+%
+%   You need to leave this as a script because it's often imperative to
+%   break in the middle without losing data.
 
 %-------------------------------------------------------------------------%
+% Revised: 02/29/16
+%   -changed to reflect new format of numsUnits, typeUnits
+%   -cleaned
+%   -augmented to replace both LearnDynamics.m (with which it was already
+%   mostly identical) and fitLDSwithREFH.m---both of which have now been
+%   retired.
 % Cribbed: 05/28/15
 %   -from LearnDynamics.m
 %   by JGM
 %-------------------------------------------------------------------------%
 
+% init
+clear; % clc;
+% params = setParams('datatype','spikecounts');
+params = setParams('datatype','bouncingballs');
 
-% train an RBM-filter on dynamical data
-clear; clc; 
+EXPERIMENTS = 'OneOff'; % 'DifferentIntervals';
+Nruns = 20;
+
+switch EXPERIMENTS
+    case 'ManyDampers'
+        Nxprmts = 12;
+        bs = linspace(0,1,Nxprmts);
+        ks = 3*ones(1,Nxprmts);
+        ms = 5*ones(1,Nxprmts);
+        dt = 0.05;
+        Nhids = params.numsUnits{2}*ones(1,Nxprmts);
+    case 'ManySprings'
+        Nxprmts = 12;
+        bs = 0.25*ones(1,Nxprmts);
+        ks = linspace(0,5,Nxprmts);
+        ms = 5*ones(1,Nxprmts);
+        dt = 0.05;
+        Nhids = params.numsUnits{2}*ones(1,Nxprmts);
+    case 'ManyMasses'
+        Nxprmts = 12;
+        bs = 0.25*ones(1,Nxprmts);
+        ks = 3*ones(1,Nxprmts);
+        ms = linspace(1,10,Nxprmts);
+        dt = 0.05;
+        Nhids = params.numsUnits{2}*ones(1,Nxprmts);
+    case 'DifferentNumbersOfHids'
+        %%% Nxprmts = 15;
+        Nxprmts = 1;
+        bs = 0.25*ones(1,Nxprmts);
+        ks = 3*ones(1,Nxprmts);
+        ms = 5*ones(1,Nxprmts);
+        dt = 0.05;
+        %%%Nsensory = params.numsUnits{1}(2);
+        %%%Nhids = (1:Nxprmts)*Nsensory;
+        Nhids = 900;
+    case 'OneOff'
+        Nxprmts = 1;
+        Nruns = 1;
+        Nhids = params.numsUnits{2};
+        %%%%%
+        % this could cause trouble in the DBN version.....
+        %%%%%
+    case 'DifferentIntervals'
+        Nruns = 1;
+        samplevec = [2,4,8,16,32,64];
+        Nxprmts = length(samplevec);
+        Nhids = ones(Nxprmts,1)*params.numsUnits{2};
+end
 
 
-load('dynamical/RTRBMtestdata150605.mat');
-params = setParams;
 
-%%% 1, 12, 20
-Factor0 = 16;
-Nfactors = 16;
-Nruns = 1;
-%%%
-
-% testing data
-[~,machine] = system('hostname');
-params.machine = strtrim(machine);
-%%% 
-% params.dynamics.T = 1000;
-% params.Ncases = 40;
-%%%testData = getLDSdata(params);
-params.Ncases = 400;
-params.dynamics.T = 40000/params.Ncases;
-%%% 
-TESTDECODING = 1;
-Ntest = 5;
-EACHBATCHISATIMESTEP = 0;
+% different recurrent models require slightly different params
+if checkGPUavailability, dataclass = 'gpuArray'; else dataclass = 'double'; end
+EACHBATCHISATRAJ = params.EACHBATCHISATRAJ;
+getLatents  = params.getLatents;
+getData     = params.getData;
+Ncases      = params.Ncases;
+Nbatches    = params.Nbatches;
+Npretrain   = params.Npretrain;
+Ntest       = 5; % params.NepochsMax;
+NepochsMax  = params.NepochsMax;
 
 
 % Ns/malloc
-Nsensory = params.Nmods*params.N^params.Ndims;
-errorStatMat = zeros(Nfactors,Nruns,'like',testData.Z);
-ydataTensor = zeros(params.DBNmaxepoch/Ntest,Nfactors,Nruns);
+Nsensory = params.numsUnits{1};
+errorStatMat = zeros(Nxprmts,Nruns);
+ydataTensor = zeros(params.NepochsMax/Ntest,Nxprmts,Nruns);
 
-
-for iFactor = Factor0:Nfactors
-    
-
-    params.numsUnits = [Nsensory + iFactor*Nsensory, iFactor*Nsensory];
-    params.t = iFactor*Nsensory;
-    params.numsUnits = [params.t+Nsensory, params.t];
-    
-    for iRun = 1:Nruns
-
-        numsUnits = params.numsUnits;
-        numRBMs = length(numsUnits)-1;
-        paramDisplay(params);
-        wts = cell(numRBMs*2,1);
-        
-        Nvis = params.numsUnits(1);
-        datagenargs = {};
-        
-        % pretraining
-        for i_rbm = 1:numRBMs
-            Nhid = numsUnits(i_rbm+1);
-            fprintf(1,'Pretraining Layer %i w/RBM: %d-%d \n',i_rbm,Nvis,Nhid);
-            restart = 1;
-            
-            % train
-            tic; rEFH; toc;
-            
-            % pack together weights for saving (hid => recog., vis => gener.)
-            wts{i_rbm} = [vishid; hidbiases];
-            wts{numRBMs*2-i_rbm+1} = [vishid'; visbiases'];
-            
-            filename = 'EncoderWtsFile';
-            save(filename,'i_rbm','numsUnits','wts','params','epoch');
-            
-            % for next time through
-            Nvis = Nhid;
-            %%% batchdata = batchphidmeans;
-            
-        end
-        ydataTensor(:,iFactor,iRun) = gather(yvar); % ydata;
-        
-        % store the error variance
-        [~,~,pEFH] = EFHfilter(testData,wts,params);
-        pEFH.name = 'rEFH';
-        
-        % test
-        [Ntraincases,~,Ntrainbatches] = size(batchdata);
-        [Ntestcases,~,Ntestbatches] = size(testData.Z);
-        params.dynamics.T = Ntestbatches;
-        params.Ncases = Ntestcases;
-        EFHstats = testDynamics(testData,params,0,pEFH);
-        params.dynamics.T = Ntrainbatches;
-        params.Ncases = Ntraincases;
-        close all;
-        errorStatMat(iFactor,iRun) = det(EFHstats(strcmp(params.mods,params.NS)).Cvrn);
-    
-        % store these weights if they're the best
-        fprintf('iRun = %i, iFactor = %i\n',iRun,iFactor);
-        currentStats = errorStatMat(Factor0:iFactor-1,:);
-        currentStatVec = [currentStats(:); errorStatMat(iFactor,1:iRun)'];
-        if errorStatMat(iFactor,iRun) == min(currentStatVec)
-            bestwts = wts;
-        end
-       
-    end
-
-    % adjust the testing data for wts of the next size
-%     Nhid = params.numsUnits(2);
-%     [Ncases,Nvis,T] = size(D0);
-%     inds = (Nhid+1):Nvis; %%% hard-coded for BP
-%     PPCs = D0(:,inds,:);
-%     fakedata = zeros(Ncases,Nhid+Nsensory,T);
-%     D0 = cat(2,fakedata,PPCs);
-   
-
+try
+    sendmail('makin@phy.ucsf.edu',...
+        sprintf('started training %s on %s',params.datatype,params.machine));
+catch ME
+    fprintf('failed to send e-mail...\n');
 end
 
-save
+% each experiment can have *different* parameters
+for iXprmt = 1:Nxprmts
+    
+    % for *this* experiment
+    switch EXPERIMENTS
+        case 'OneOff'
+            % do nothing
+        case 'DifferentIntervals'
+            params.Nsamples = samplevec(iXprmt);
+            %params = setLearningSchedules(350,200,200,'exp',params,5/params.Nsamples);
+            params = setLearningSchedules(22*params.Nsamples,12*params.Nsamples,...
+                12*params.Nsamples,'exp',params,110,60);
+        otherwise
+            params.dynamics.A = [1.0000, dt; -ks(iXprmt)/ms(iXprmt)*dt,...
+                -(bs(iXprmt)/ms(iXprmt)*dt-1)];
+    end
+    
+    
+    
+    params.numsUnits = {[Nhids(iXprmt),Nsensory],Nhids(iXprmt)};
+    
+    
+    % each run has *the same* parameters
+    numsUnits = params.numsUnits;
+    NEFHs = length(numsUnits)-1;
+    for iRun = 1:Nruns
+        
+        % init
+        paramDisplay(params);
+        wts = cell(NEFHs*2,1);
+        
+        % "pretraining"
+        for iEFH = 1:NEFHs
+            fprintf(1,'Pretraining layer %i w/EFH: %d-%d \n',...
+                iEFH,sum(numsUnits{iEFH}),sum(numsUnits{iEFH+1}));
+            RESTART = 1;
+            
+            % train
+            tic; EFH; toc;
+            
+            % pack together weights for saving (hid => recog., vis => gener.)
+            wts{iEFH} = [vishid; hidbiases];
+            wts{NEFHs*2-iEFH+1} = [vishid'; visbiases'];
+            
+            % save, just in case
+            filename = 'EncoderWtsFile';
+            save(filename,'iEFH','numsUnits','wts','params','epoch');
+            
+        end
+        ydataTensor(:,iXprmt,iRun) = gather(figmap('TestError').data);
+        errorStatMat(iXprmt,iRun) = ydataTensor(end,iXprmt,iRun);
+        
+        
+        % store these weights if they're the best
+        fprintf('Finished run %i of experiment %i\n',iRun,iXprmt);
+        currentStats = errorStatMat(1:iXprmt-1,:);
+        currentStatVec = [currentStats(:); errorStatMat(iXprmt,1:iRun)'];
+        if errorStatMat(iXprmt,iRun) == min(currentStatVec)
+            bestwts = wts;
+        end
+        
+        
+        % store the weights anyway if this is a "one-off" experiment
+        if strcmp(EXPERIMENTS,'OneOff'), Allwts{iRun} = wts; end
+        
+        save
+    end
+    
+    
+end
+
+try
+    sendmail('makin@phy.ucsf.edu',...
+        sprintf('finished training %s on %s',params.datatype,params.machine));
+catch ME
+    fprintf('failed to send e-mail...\n');
+end
+
+
+
+
+
+
+
+
+
+
+
+
+

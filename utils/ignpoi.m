@@ -92,10 +92,7 @@ function smpls = getPoisCumProbLoopC(mus,u,q,p)
 
 Nmin = 0;
 Nmax = 35;
-smpls = sum(bsxfun(@gt,u,...
-    bsxfun(@times,p,...
-    cumsum(bsxfun(@rdivide,bsxfun(@power,mus,Nmin:Nmax),...
-    factorial(Nmin:Nmax)),2))),2);
+smpls = sum(u > p.*cumsum((mus.^(Nmin:Nmax))./factorial(Nmin:Nmax),2),2);
 
 
 
