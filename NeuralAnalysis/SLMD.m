@@ -42,14 +42,13 @@ fprintf('"canonical" training time is %d seconds\n',trainingtimes);
 
 
 
-% effect of rEFH components
-effectOfREFHcomponents(monkeys);
 
 keyboard
 
 
 % rEFH vs. nearest rival
-nearestRivalPlots(decoders,kinemat,binwidths,mkinds,monkeys,'refhdynamic',{'ukf'});
+[B,p] = nearestRivalPlots(decoders,kinemat,binwidths,mkinds,monkeys,...
+    'refhdynamic',{'ukf'});
 
 % how much improvement for pos, vel, acc?
 summaryStats(decoders,kinemat,binwidths,NdataTest,'refhdynamic',{'kfobs','ukf'});
@@ -65,6 +64,13 @@ effectOfNumberOfTrainingSamples(decoders,monkeys,0);
 
 % effect of dropping out neurons
 effectOfNumberOfNeurons(decoders,kinemat,binwidths,Nneurons,mkinds,monkeys,0);
+
+% effect of rEFH components
+effectOfREFHcomponents(monkeys);
+
+
+
+
 
 
 
@@ -151,7 +157,7 @@ end
 %-------------------------------------------------------------------------%
 
 %-------------------------------------------------------------------------%
-function nearestRivalPlots(decoders,kinemat,binwidths,mkinds,monkeys,....
+function [B,p] = nearestRivalPlots(decoders,kinemat,binwidths,mkinds,monkeys,....
     standardname,rivalnames)
 % R^2 and SNR: rEFH vs. nearest rival (\FigNearestRivalScatterPlots)
 
@@ -162,6 +168,7 @@ Norder = Nstates/Ndims;
 Nbinwidths = length(binwidths);
 Nmonkeys = length(mkinds);
 Ndecoders = length(decoders);
+Nrivals = length(rivalnames);
 
 
 % "meta-data"
@@ -177,6 +184,8 @@ rivals = find(ismember({decoders(:).name},rivalnames));
 
 
 % for each binwidth
+B = zeros(2,Nmonkeys,Norder,Nbinwidths,Nrivals);
+p = zeros(1,Nmonkeys,Norder,Nbinwidths,Nrivals);
 for iBinwidth = 1:Nbinwidths
     Nmsperbin = binwidths(iBinwidth);
             
@@ -184,7 +193,7 @@ for iBinwidth = 1:Nbinwidths
         texnames = repmat(texnamemat(:,iOrder),[1,Nmonkeys]);        
         
         
-        for iRival = 1:length(rivals)
+        for iRival = 1:Nrivals
             iDecoder = rivals(iRival);
             
             scatterWithEqualityLine(...
@@ -198,7 +207,8 @@ for iBinwidth = 1:Nbinwidths
                 monkeylabels,filesuffices{1,iOrder}(1:3),...
                 basefignum+iOrder+10*iBinwidth+(iRival-1)*1000);
             
-            scatterWithEqualityLine(...
+            [B(:,:,iOrder,iBinwidth,iRival), p(:,:,iOrder,iBinwidth,iRival)] =...
+                scatterWithEqualityLine(...
                 Rsq2SNR(allRsqs(:,:,iOrder,iBinwidth,iDecoder)),...
                 Rsq2SNR(allRsqs(:,:,iOrder,iBinwidth,iStandard)),...
                 mkinds,texnames,'SNR',0,10,...
@@ -217,24 +227,48 @@ end
 %-------------------------------------------------------------------------%
 
 %-------------------------------------------------------------------------%
-function scatterWithEqualityLine(xx,yy,mkinds,varsymbols,fitmetric,...
-    fitmetricMin,fitmetricMax,yrxlabel,yrylabel,varname,binwidth,...
-    Nmsperbin,standardstr,rivalstr,monkeylabels,filesuffix,fignum)
+function [beta1,p] = scatterWithEqualityLine(xx,yy,mkinds,varsymbols,...
+    fitmetric,fitmetricMin,fitmetricMax,yrxlabel,yrylabel,varname,...
+    binwidth,Nmsperbin,standardstr,rivalstr,monkeylabels,filesuffix,fignum)
 
 
 % init
+Nmonkeys = length(mkinds);
 [~,machine] = system('hostname');
 machine = strtrim(machine);
 h = figure(fignum); clf; hold on;
-%%%% these are ugly; consider changing....
 clrs = [
     27,158,119;...      % greenish
     217,95,2;...        % orangish
     117,112,179;...     % purplish
     ]/255;
+% cbrewer Dark2
+
 
 % for each monkey...
-for iMk = 1:length(mkinds)
+beta1 = zeros(2,Nmonkeys);
+p = zeros(1,Nmonkeys);
+for iMk = 1:Nmonkeys
+    
+    xxx = xx(mkinds{iMk})';
+    yyy = yy(mkinds{iMk})';
+    Msessions = length(xxx);
+    
+    % H0: assume the slope is unity
+    beta0 = [1; mean(yyy - xxx)];
+    SS0 = sum( (yyy - [xxx,ones(Msessions,1)]*beta0).^2  );
+    df0 = Msessions - 1; % intercept
+    
+    % H1: fit the slope
+    [beta1(:,iMk),~,Yres] = linregress([xxx,ones(Msessions,1)],yyy);
+    SS1 = sum(Yres.^2);
+    df1 = Msessions - 2; % slope and intercept
+    
+    % f statistic
+    f = ((SS0 - SS1)/(df0 - df1))/(SS1/df1);
+    p(iMk) = 1 - fcdf(f,df0,df1);
+    
+    % scatter
     scatter(xx(mkinds{iMk},1),yy(mkinds{iMk},1),'x',...
         'MarkerEdgeColor',clrs(iMk,:),'MarkerFaceColor','none');
     scatter(xx(mkinds{iMk},2),yy(mkinds{iMk},2),'o',...
@@ -279,9 +313,11 @@ function summaryStats(decoders,kinemat,binwidths,NdataTest,standardname,rivalnam
 Ndims = 2;
 Nstates = length(kinemat);
 Norder = Nstates/Ndims;
+Nsessions = size(NdataTest,1);
+Nbinwidths = length(binwidths);
 
 % indices
-irEFH = strcmp({decoders(:).name},standardname);
+iStandard = strcmp({decoders(:).name},standardname);
 rivals = find(ismember({decoders(:).name},rivalnames));
 
 
@@ -290,21 +326,93 @@ kinnames = reshape({kinemat.legendname},Ndims,[]);
 for iRival = 1:length(rivals)
     iDecoder = rivals(iRival);
     
-    % SNR
-    avgimprovementSNRA = squeeze(sum(NdataTest.*...
-        (Rsq2SNR(decoders(irEFH).CoD) - Rsq2SNR(decoders(iDecoder).CoD)),1)./...
-        sum(NdataTest,1))';
-    avgimprovementSNRB = squeeze(mean(reshape(avgimprovementSNRA,...
-        [],Ndims,Norder),2));
     
-    % say:
-    printmatJGM(avgimprovementSNRA,...
-        sprintf('Improvement (rEFH over %s) in SNR (dB)',decoders(iDecoder).texname),...
-        sprintf('%dms ',binwidths),sprintf('%s ',kinemat.name))
-    printmatJGM(avgimprovementSNRB,...
-        sprintf('Improvement (rEFH over %s) in SNR (dB)',decoders(iDecoder).texname),...
-        sprintf('%dms ',binwidths),sprintf('%s ',kinnames{1,:}))
+    keyboard
+    
+    % SNR
+    [MeanImprovementSNR,ISSIGgauss,ISSIGperm] = signify(...
+        Rsq2SNR(decoders(iStandard).CoD),Rsq2SNR(decoders(iDecoder).CoD),...
+        NdataTest,0.01);
+    printmatJGM(squeeze(MeanImprovementSNR)',...
+        sprintf('Improvement (rEFH over %s) in SNR (dB)',...
+        decoders(iDecoder).texname),...
+        sprintf('%dms ',binwidths),...
+        sprintf('%s ',kinemat.name))
+    printmatJGM(squeeze(ISSIGgauss)',...
+        sprintf('Significant difference with %s? (rEFH=+1 over %s)',...
+        decoders(iDecoder).texname),...
+        sprintf('%dms ',binwidths),...
+        sprintf('%s ',kinemat.name))
+    
+    
+    
+    [MeanImprovementSNR,ISSIGgauss,ISSIGperm] = signify(...
+        reshape(Rsq2SNR(decoders(iStandard).CoD),Nsessions*Ndims,Norder,Nbinwidths,[]),...
+        reshape(Rsq2SNR(decoders(iDecoder).CoD),Nsessions*Ndims,Norder,Nbinwidths,[]),...
+        repmat(NdataTest,[Ndims,1,1,1]),0.01);
+    printmatJGM(squeeze(MeanImprovementSNR)',...
+        sprintf('Improvement (rEFH over %s) in SNR (dB)',...
+        decoders(iDecoder).texname),...
+        sprintf('%dms ',binwidths),...
+        sprintf('%s ',kinnames{1,:}))
+    printmatJGM(squeeze(ISSIGgauss)',...
+        sprintf('Significant difference with %s? (rEFH=+1 over %s)',...
+        decoders(iDecoder).texname),...
+        sprintf('%dms ',binwidths),...
+        sprintf('%s ',kinnames{1,:}))
+    
+    
 end
+
+
+end
+%-------------------------------------------------------------------------%
+
+%-------------------------------------------------------------------------%
+function [MeanImprovement,ISSIGgauss,ISSIGperm] =...
+    signify(fitsStandard,fitsRival,NdataTest,alp)
+
+% Ns
+[Nsessions,Nstates,Nbins] = size(fitsStandard);
+Nperms = 50000;
+
+
+% based on the assumption of a normal distribution
+DiffWithRival = fitsStandard - fitsRival;
+MeanImprovement = sum(NdataTest.*DiffWithRival,1)./sum(NdataTest,1);
+VrncImprovement = sum(NdataTest.*...
+    (DiffWithRival - MeanImprovement).^2)./sum(NdataTest);
+StdErrorOfMeanImprovementSNR = sqrt(VrncImprovement/Nsessions);
+ISSIGgauss = (norminv(alp/2,...
+    abs(MeanImprovement),StdErrorOfMeanImprovementSNR) > 0).*...
+    sign(MeanImprovement);
+
+
+% based on a permutation test
+wtdFitsStandard = fitsStandard.*NdataTest./sum(NdataTest);
+wtdFitsRival = fitsRival.*NdataTest./sum(NdataTest);
+
+% cat rival first because you use diff below
+bothFits = cat(1,wtdFitsRival,wtdFitsStandard);
+
+% now sample
+inds = ceil(2*Nsessions*rand(Nsessions*2*Nperms,1));
+bootFits = reshape(bothFits(inds,:,:),Nsessions,2,Nperms,Nstates,Nbins);
+bootDstrb = permute(diff(sum(bootFits),[],2),[3,4,5,1,2]);
+pBoot = mean(MeanImprovement < bootDstrb);
+ISSIGperm = pBoot < alp;
+
+
+keyboard
+bothFits = cat(1,fitsRival,fitsStandard);
+MdataTest = repmat(NdataTest,[2,1,1]);
+wts = permute(MdataTest./sum(MdataTest),[1,3,2]);
+inds = categorsmpl(wts(:,1),Nsessions*2*Nperms,'IndexBased');
+%%% might want to decouple across bins, although it's not necessary
+bootFits = reshape(bothFits(inds,:,:),Nsessions,2,Nperms,Nstates,Nbins);
+bootDstrb = permute(mean(diff(bootFits,[],2)),[3,4,5,1,2]);
+pBoot = mean(MeanImprovement < bootDstrb);
+ISSIGperm = pBoot < alp;
 
 
 end
@@ -343,8 +451,7 @@ function barPlotCore(fitscores,kinemat,binwidths,NdataTest,...
 
 % plot the averages, with error bars
 MeanFits = sum(NdataTest.*fitscores,1)./sum(NdataTest,1);
-VrncFits = sum(NdataTest.*(fitscores - MeanFits).^2,1)./...
-    sum(NdataTest,1);
+VrncFits = sum(NdataTest.*(fitscores - MeanFits).^2,1)./sum(NdataTest,1);
 for iBinwidth = 1:Nbinwidths
     muDiff = permute(MeanFits(1,:,iBinwidth,:),[2,4,1,3]);
     stdErr = sqrt(VrncFits(1,:,iBinwidth,:)/Nsessions);
@@ -631,25 +738,26 @@ for iDecoder = 1:length(staticdecoders)
 end
 allRsqs = cat(4,decoders.CoD);
 
-% % combine across dimensions
+
+% combine across dimensions
 Ndims = 2; % fact 
 tmp = reshape({kinemat.legendname},Ndims,[]);
 [xaxislabels(1:length(kinemat)/Ndims).texname] = deal(tmp{1,:});
 
 % R^2
-DiffWithStatic = allRsqs - decoderUKF.CoD;
-DiffWithStatic = reshape(DiffWithStatic,size(allRsqs,1)*Ndims,...
+DiffWithUKF = allRsqs - decoderUKF.CoD;
+DiffWithUKF = reshape(DiffWithUKF,size(allRsqs,1)*Ndims,...
     length(kinemat)/Ndims,length(binwidths),[]);
-barPlotCore(DiffWithStatic,xaxislabels,binwidths,...
+barPlotCore(DiffWithUKF,xaxislabels,binwidths,...
     repmat(NdataTest,[Ndims,1,1]),'R$^2_\text{rEFH}$ - R$^2_\text{UKF}$',...
     {decoders.barcolor},'CoD_rEFH');
 
 % SNR
 bruteforcetext = getbruteforcetext;
-DiffWithStatic = Rsq2SNR(allRsqs) - Rsq2SNR(decoderUKF.CoD);
-DiffWithStatic = reshape(DiffWithStatic,size(allRsqs,1)*Ndims,...
+DiffWithUKF = Rsq2SNR(allRsqs) - Rsq2SNR(decoderUKF.CoD);
+DiffWithUKF = reshape(DiffWithUKF,size(allRsqs,1)*Ndims,...
    length(kinemat)/Ndims,length(binwidths),[]);
-barPlotCore(DiffWithStatic,xaxislabels,binwidths,...
+barPlotCore(DiffWithUKF,xaxislabels,binwidths,...
     repmat(NdataTest,[Ndims,1,1]),'SNR$_\text{rEFH}$ - SNR$_\text{UKF}$ (dB)',...
     {decoders.barcolor},'SNR_rEFH','extraAxisText',bruteforcetext,...
     'ymin',-0.5);

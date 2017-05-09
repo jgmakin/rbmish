@@ -54,43 +54,11 @@ function [Bvx,LDSparamsObs] = getREFHDecoders(V,X,Ntraj)
 [Nsamples,Nv] = size(V);
 [Bvx,~,~,Xhat] = linregress(V,X,'none',(Nv/Nsamples)^(10/3));
 
-
-
-%[Bvx,~,~,Xhat] = linregress(V,X);
-%[Bvx(:,1:2),~,~,Xhat(:,1:2)] = linregress(V,X(:,1:2),'none',(Nv/Nsamples)^(35));
-%[Bvx(:,3:6),~,~,Xhat(:,3:6)] = linregress(V,X(:,3:6),'none',(Nv/Nsamples)^(10/3));
-%%%%
-
-%%% Or you could just low-pass filter....
-%%% Fhigh = 0.5; iState = 2; 
-%%% [b,a] = butter(5,2*(Fhigh*(params.Nmsperbin/1000)),'low'); 
-%%% 1 - sum((filtfilt(b,a,gather(XhatStatic(:,iState))) - Xtest(:,iState)).^2)./SStot(iState);
-
-
 % dynamic decoder
 LDSparamsObs = learnfullyobservedLDS(shortdata(Ntraj,3,Xhat),...
     shortdata(Ntraj,3,X));
 LDSparamsObs.mu0 = mean(X)';                    % use *all* data to get 
 LDSparamsObs.Info0 = inv(cov(X));               %   initial state
- 
-% only *fit* the state observation matrix for the positions
-% Nstates = size(Xhat,2);
-%%%%C = eye(size(LDSparamsObs.C,1),'like',V);
-% I = eye(6,'like',V);
-% C = LDSparamsObs.C;
-% C(1:2:end,:) = I(1:2:end,:);
-%%%%
-%C(1:2,1:2) = LDSparamsObs.C(1:2,1:2);
-% %C(1,1) = LDSparamsObs.C(1,1);
-% %C(2,2) = LDSparamsObs.C(2,2);
-% LDSparamsObs.C = C;
-% LDSparamsObs.muYX = mean(Xhat - X*C')';
-% LDSparamsObs.SigmaYX = cov(Xhat - X*C');
-
-
-% LDSparamsObs.SigmaYX(1:2,1:2) = ...
-%     LDSparamsObs.SigmaYX(1:2,1:2)*2;
-
 
 end
 %-------------------------------------------------------------------------%

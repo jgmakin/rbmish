@@ -21,7 +21,7 @@ decodernames = {'refhstatic','refhdynamic'};
 
 TOPLOT = 0;
 if checkGPUavailability, dataclass = 'gpuArray'; else dataclass = 'double'; end
-monkey = 'Loco';
+monkey = 'Indy';
 Nmsperbin = 64; %%%[16,32,64,128];
 Nbinsizes = length(Nmsperbin);
 Ndecoders = length(decodernames);
@@ -61,7 +61,7 @@ NdataTest = zeros(Nsessions,1,Nbinsizes,dataclass);
 
 
 % loop across sessions and bins
-for iSession = 1%%%%1:Nsessions
+for iSession = 1:Nsessions
     session = dates{iSession};
     year    = session(1:4);
     month   = session(5:6);
@@ -130,16 +130,17 @@ for iSession = 1%%%%1:Nsessions
             end
         end
         
-        % run the filters
-        [Rsqs(iSession,:,iBinsize,:), NdataTest(iSession,1,iBinsize)] =...
-            filtersForNeuralData(wts,params,LDSparamsEM,decodernames,TOPLOT);
-        %%%Nneurons(iSession,1,iBinsize) = params.numsUnits{1}(1);
-        
-        % save results
-        save(sprintf('allRsqs%s%03dsTrainingtime_%s_%s',...
-            monkey,params.trainingtime,date,params.typeUnits{1}{1}),...
-            'decodernames','Rsqs','dates','seqnums','NdataTest');
-        %%% kinemat?  trainingTime? binwidths? etc.
+%         % run the filters
+%         [Rsqs(iSession,:,iBinsize,:), NdataTest(iSession,1,iBinsize)] =...
+%             filtersForNeuralData(wts,params,LDSparamsEM,decodernames,TOPLOT);
+%         %%%Nneurons(iSession,1,iBinsize) = params.numsUnits{1}(1);
+%         
+%         % save results
+%         save(sprintf('allRsqs%s%03dsTrainingtime_%s_%s',...
+%             monkey,params.trainingtime,date,params.typeUnits{1}{1}),...
+%             'decodernames','Rsqs','dates','seqnums','NdataTest');
+%         %%% kinemat?  trainingTime? binwidths? etc.
+        params.mods
     end
 
     

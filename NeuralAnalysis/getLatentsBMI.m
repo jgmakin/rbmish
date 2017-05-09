@@ -62,9 +62,6 @@ UnitSpikesT = cell2struct(spikedata(nonDeadUnitInds),'t',1);
 % transform kinematic data and spike times into useful data
 [R,X,~] = binSpikeCounts(St,UnitSpikesT,BinParams);
 R = R(:,mean(R)/sperbin>minRate);
-%%%%%
-R = R(:,var(R) > 0.2);
-%%%%%
 if isfield(params,'fraction'), R = R(:,1:(floor(end*params.fraction))); end
 
 
