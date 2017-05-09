@@ -27,13 +27,38 @@ function samples = categorsmpl(pmf,Ntrials,representationType)
 %   by JGM
 %-------------------------------------------------------------------------%
 
+% Ns
+[Ncats,Ndice] = size(pmf);
 
-Ndice = size(pmf,2);
-samples = diff([zeros(1,Ndice); cumsum(pmf)] > rand(1,Ndice,Ntrials));
-if ~strcmp(representationType,'OneHot')
-    [samples, ~] =  find(samples);
-    samples = reshape(samples,[Ndice,Ntrials])';
-end
+% don't create too large of a tensor 
+if Ncats*Ndice*Ntrials > 100000000
+    fprintf('Ncats*Ndice*Ntrials > 100,000,000; recursing...   ');
+    fprintf('(OneHot representation not advised)\n');
     
+    % break into two pieces
+    samplesA = categorsmpl(pmf,floor(Ntrials/2),representationType);
+    samplesB = categorsmpl(pmf,Ntrials - floor(Ntrials/2),representationType);
+    if ~strcmp(representationType,'OneHot')
+        samples = cat(1,samplesA,samplesB);
+    else
+        % but this is probably too big
+        samples = cat(3,samplesA,samplesB);
+    end
+    
+else
+    % the sampling procedure
+    samples = diff([zeros(1,Ndice); cumsum(pmf)] > rand(1,Ndice,Ntrials));
+    
+    if ~strcmp(representationType,'OneHot')
+        [samples, ~] =  find(samples);
+        samples = reshape(samples,[Ndice,Ntrials])';
+    end
+    
+end
 
 end
+
+
+
+
+

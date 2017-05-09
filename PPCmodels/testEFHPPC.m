@@ -38,7 +38,7 @@ propagation = defaulter('updownargs','means',varargin{:});
 
 % up and down, then decode (center of mass), then compute errors
 if isfield(Q,'T')
-    R1 = updownRDBN(R0,wts,params,Q.T,propagation);
+    R1 = updownRDBN(R0,wts,params,Q.T,'propagation',propagation);
 else
     R1 = updownDBN(R0,wts,params,propagation);
 end

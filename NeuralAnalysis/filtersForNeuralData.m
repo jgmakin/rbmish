@@ -487,7 +487,7 @@ function [UKFparams, RsqUKF] = UKFDecoder(Rtrain,Xtrain,T,Rtest,Xtest,...
 fparams = [];  % extra params for f, not needed
 ftaps = defaulter('ftaps',2,varargin{:});       % future taps
 ptaps = defaulter('ptaps',3,varargin{:});       % past taps
-mtaps = defaulter('mtaps',1,varargin{:});       % backbone; >=ftaps+ptas
+mtaps = defaulter('mtaps',1,varargin{:});       % backbone; <=ftaps+ptas
 htaps = defaulter('htaps',1,varargin{:});       % spiking history taps
 alphamax = 16; % maximum regularization (ridge regression) parameter
 

@@ -26,13 +26,15 @@ function varargout = longdata(varargin)
 
 for i = 1:nargin
     shrtform = varargin{i};
-    
+    Nways = ndims(shrtform);
     shrtdims = size(shrtform);
-    longdims = [shrtdims(2:end-1) shrtdims(1)*shrtdims(end)];
+    finaldim = size(shrtform,max(Nways,3));
+    longdims = [shrtdims(2:max(2,Nways-1)) shrtdims(1)*finaldim];
     cmptform = reshape(shiftdim(shrtform,1),longdims);
     longform = shiftdim(cmptform,length(longdims)-1);
     
     varargout{i} = longform;
 end
+
 
 end

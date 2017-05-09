@@ -32,19 +32,13 @@ Mlayers = length(params.numsUnits); % in the *complete* DBN
 Rin     = shortdata(Ntraj,3,Rin);
 Rout    = zeros(size(Rin),'like',Rin);
 Z       = zeros([Ntraj,sum(hidNums),T],'like',Rin);
-thisZ   = zeros([Ntraj,sum(hidNums)],'like',Rin);
-VERBOSE = 1;
-propagation = 'means';
-for i=1:length(varargin)
-    switch varargin{i}
-        case {'suffstats','MLE','modes','means','Nsamples'}
-            propagation = varargin{i};
-        case 'quiet'
-            VERBOSE = 0;
-        otherwise
-            fprintf('unrecognized option for updownRDBN -- jgm\n');
-    end
-end
+
+% variable input arguments
+propagation = defaulter('propagation','means',varargin{:});
+VERBOSE = defaulter('verbosity',1,varargin{:});
+thisZ = defaulter('initial recurrents',...
+    zeros([Ntraj,sum(hidNums)],'like',Rin),varargin{:});
+
 if VERBOSE
     fprintf('propagating ');
     switch propagation
@@ -59,7 +53,6 @@ if VERBOSE
 end
 
 % up-down pass
-fprintf('\nFiltering (EFH)');
 for t = 1:T
     
     % push data up to the penultimate layer
@@ -106,10 +99,9 @@ for t = 1:T
     Rout(:,:,t) = thisR;
     
 end
-fprintf('\n');
+if VERBOSE, fprintf('\n'); end
 
-Rout = longdata(Rout);
-Z = longdata(Z);
+[Rout,Z] = longdata(Rout,Z);
 
 
 end

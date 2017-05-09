@@ -47,8 +47,8 @@ keyboard
 
 
 % rEFH vs. nearest rival
-[B,p] = nearestRivalPlots(decoders,kinemat,binwidths,mkinds,monkeys,...
-    'refhdynamic',{'ukf'});
+[BByMk,pByMk,BAllMks,pAllMks] = nearestRivalPlots(decoders,kinemat,...
+    binwidths,mkinds,monkeys,'refhdynamic',{'ukf'});
 
 % how much improvement for pos, vel, acc?
 summaryStats(decoders,kinemat,binwidths,NdataTest,'refhdynamic',{'kfobs','ukf'});
@@ -157,8 +157,8 @@ end
 %-------------------------------------------------------------------------%
 
 %-------------------------------------------------------------------------%
-function [B,p] = nearestRivalPlots(decoders,kinemat,binwidths,mkinds,monkeys,....
-    standardname,rivalnames)
+function [BByMk,pByMk,BAllMks,pAllMks] = nearestRivalPlots(...
+    decoders,kinemat,binwidths,mkinds,monkeys,standardname,rivalnames)
 % R^2 and SNR: rEFH vs. nearest rival (\FigNearestRivalScatterPlots)
 
 % Ns
@@ -184,14 +184,16 @@ rivals = find(ismember({decoders(:).name},rivalnames));
 
 
 % for each binwidth
-B = zeros(2,Nmonkeys,Norder,Nbinwidths,Nrivals);
-p = zeros(1,Nmonkeys,Norder,Nbinwidths,Nrivals);
+BByMk = zeros(2,Nmonkeys,Norder,Nbinwidths,Nrivals);
+pByMk = zeros(1,Nmonkeys,Norder,Nbinwidths,Nrivals);
+BAllMks = zeros(2,Norder,Nbinwidths,Nrivals);
+pAllMks = zeros(1,Norder,Nbinwidths,Nrivals);
+
 for iBinwidth = 1:Nbinwidths
     Nmsperbin = binwidths(iBinwidth);
             
     for iOrder = 1:Norder
-        texnames = repmat(texnamemat(:,iOrder),[1,Nmonkeys]);        
-        
+        texnames = repmat(texnamemat(:,iOrder),[1,Nmonkeys]);
         
         for iRival = 1:Nrivals
             iDecoder = rivals(iRival);
@@ -207,7 +209,8 @@ for iBinwidth = 1:Nbinwidths
                 monkeylabels,filesuffices{1,iOrder}(1:3),...
                 basefignum+iOrder+10*iBinwidth+(iRival-1)*1000);
             
-            [B(:,:,iOrder,iBinwidth,iRival), p(:,:,iOrder,iBinwidth,iRival)] =...
+            [BByMk(:,:,iOrder,iBinwidth,iRival), pByMk(:,:,iOrder,iBinwidth,iRival),...
+                BAllMks(:,iOrder,iBinwidth,iRival), pAllMks(:,iOrder,iBinwidth,iRival)] = ...
                 scatterWithEqualityLine(...
                 Rsq2SNR(allRsqs(:,:,iOrder,iBinwidth,iDecoder)),...
                 Rsq2SNR(allRsqs(:,:,iOrder,iBinwidth,iStandard)),...
@@ -227,7 +230,8 @@ end
 %-------------------------------------------------------------------------%
 
 %-------------------------------------------------------------------------%
-function [beta1,p] = scatterWithEqualityLine(xx,yy,mkinds,varsymbols,...
+function [BByMk,pByMk,BAllMks,pAllMks] =...
+    scatterWithEqualityLine(xx,yy,mkinds,varsymbols,...
     fitmetric,fitmetricMin,fitmetricMax,yrxlabel,yrylabel,varname,...
     binwidth,Nmsperbin,standardstr,rivalstr,monkeylabels,filesuffix,fignum)
 
@@ -246,12 +250,13 @@ clrs = [
 
 
 % for each monkey...
-beta1 = zeros(2,Nmonkeys);
-p = zeros(1,Nmonkeys);
+BByMk = zeros(2,Nmonkeys);
+pByMk = zeros(1,Nmonkeys);
 for iMk = 1:Nmonkeys
     
-    xxx = xx(mkinds{iMk})';
-    yyy = yy(mkinds{iMk})';
+    % is the advantage improving with SNR?  cf. w/model with m=1 (each mk)
+    xxx = vect(xx(mkinds{iMk},:));
+    yyy = vect(yy(mkinds{iMk},:));
     Msessions = length(xxx);
     
     % H0: assume the slope is unity
@@ -260,13 +265,13 @@ for iMk = 1:Nmonkeys
     df0 = Msessions - 1; % intercept
     
     % H1: fit the slope
-    [beta1(:,iMk),~,Yres] = linregress([xxx,ones(Msessions,1)],yyy);
+    [BByMk(:,iMk),~,Yres] = linregress([xxx,ones(Msessions,1)],yyy);
     SS1 = sum(Yres.^2);
     df1 = Msessions - 2; % slope and intercept
     
     % f statistic
     f = ((SS0 - SS1)/(df0 - df1))/(SS1/df1);
-    p(iMk) = 1 - fcdf(f,df0,df1);
+    pByMk(iMk) = 1 - fcdf(f,df0,df1);
     
     % scatter
     scatter(xx(mkinds{iMk},1),yy(mkinds{iMk},1),'x',...
@@ -278,6 +283,27 @@ for iMk = 1:Nmonkeys
 end
 plot([fitmetricMin,fitmetricMax],[fitmetricMin,fitmetricMax],'k');
 hold off;
+
+
+% is the advantage improving with SNR?  cf. w/model with m=1 (all monkeys)
+Msessions = length(xx(:));
+
+% H0: assume the slope is unity
+beta0 = [1; mean(yy(:) - xx(:))];
+SS0 = sum( (yy(:) - [xx(:),ones(Msessions,1)]*beta0).^2  );
+df0 = Msessions - 1; % intercept
+
+% H1: fit the slope
+[BAllMks,~,Yres] = linregress([xx(:),ones(Msessions,1)],yy(:));
+SS1 = sum(Yres.^2);
+df1 = Msessions - 2; % slope and intercept
+
+% f statistic
+f = ((SS0 - SS1)/(df0 - df1))/(SS1/df1);
+pAllMks = 1 - fcdf(f,df0,df1);
+
+
+
 
 % annotate
 legend(labels,'Location','SouthEast','Interpreter','Latex')
@@ -320,6 +346,8 @@ Nbinwidths = length(binwidths);
 iStandard = strcmp({decoders(:).name},standardname);
 rivals = find(ismember({decoders(:).name},rivalnames));
 
+% "significance level"
+alp = 0.01;
 
 % for each "rival"
 kinnames = reshape({kinemat.legendname},Ndims,[]);
@@ -327,41 +355,38 @@ for iRival = 1:length(rivals)
     iDecoder = rivals(iRival);
     
     
-    keyboard
-    
     % SNR
-    [MeanImprovementSNR,ISSIGgauss,ISSIGperm] = signify(...
+    % all kinematic vars
+    [MeanImprovementSNR,ISSIG] = signify(...
         Rsq2SNR(decoders(iStandard).CoD),Rsq2SNR(decoders(iDecoder).CoD),...
-        NdataTest,0.01);
+        NdataTest,alp,1);
     printmatJGM(squeeze(MeanImprovementSNR)',...
         sprintf('Improvement (rEFH over %s) in SNR (dB)',...
         decoders(iDecoder).texname),...
         sprintf('%dms ',binwidths),...
         sprintf('%s ',kinemat.name))
-    printmatJGM(squeeze(ISSIGgauss)',...
+    printmatJGM(squeeze(ISSIG)',...
         sprintf('Significant difference with %s? (rEFH=+1 over %s)',...
         decoders(iDecoder).texname),...
         sprintf('%dms ',binwidths),...
         sprintf('%s ',kinemat.name))
     
-    
-    
-    [MeanImprovementSNR,ISSIGgauss,ISSIGperm] = signify(...
+    % pooled within the plane
+    [MeanImprovementSNR,ISSIG] = signify(...
         reshape(Rsq2SNR(decoders(iStandard).CoD),Nsessions*Ndims,Norder,Nbinwidths,[]),...
         reshape(Rsq2SNR(decoders(iDecoder).CoD),Nsessions*Ndims,Norder,Nbinwidths,[]),...
-        repmat(NdataTest,[Ndims,1,1,1]),0.01);
+        repmat(NdataTest,[Ndims,1,1,1]),alp,1);
     printmatJGM(squeeze(MeanImprovementSNR)',...
         sprintf('Improvement (rEFH over %s) in SNR (dB)',...
         decoders(iDecoder).texname),...
         sprintf('%dms ',binwidths),...
         sprintf('%s ',kinnames{1,:}))
-    printmatJGM(squeeze(ISSIGgauss)',...
+    printmatJGM(squeeze(ISSIG)',...
         sprintf('Significant difference with %s? (rEFH=+1 over %s)',...
         decoders(iDecoder).texname),...
         sprintf('%dms ',binwidths),...
         sprintf('%s ',kinnames{1,:}))
     
-    
 end
 
 
@@ -369,51 +394,58 @@ end
 %-------------------------------------------------------------------------%
 
 %-------------------------------------------------------------------------%
-function [MeanImprovement,ISSIGgauss,ISSIGperm] =...
-    signify(fitsStandard,fitsRival,NdataTest,alp)
+function [MeanImprovement,ISSIG] =...
+    signify(fitsStandard,fitsRival,NdataTest,alp,USEPERM)
+
 
 % Ns
 [Nsessions,Nstates,Nbins] = size(fitsStandard);
-Nperms = 50000;
+Nperms = 100000;
 
-
-% based on the assumption of a normal distribution
+% mean differences
 DiffWithRival = fitsStandard - fitsRival;
 MeanImprovement = sum(NdataTest.*DiffWithRival,1)./sum(NdataTest,1);
-VrncImprovement = sum(NdataTest.*...
-    (DiffWithRival - MeanImprovement).^2)./sum(NdataTest);
-StdErrorOfMeanImprovementSNR = sqrt(VrncImprovement/Nsessions);
-ISSIGgauss = (norminv(alp/2,...
-    abs(MeanImprovement),StdErrorOfMeanImprovementSNR) > 0).*...
-    sign(MeanImprovement);
+
+% significance tests
+if ~USEPERM
+    
+    % based on the assumption of a normal distribution
+    VrncImprovement = sum(NdataTest.*...
+        (DiffWithRival - MeanImprovement).^2)./sum(NdataTest);
+    StdErrorOfMeanImprovementSNR = sqrt(VrncImprovement/Nsessions);
+    ISSIG = (norminv(alp/2,...
+        abs(MeanImprovement),StdErrorOfMeanImprovementSNR) > 0).*...
+        sign(MeanImprovement);
+else
+    
+    % based on a permutation test
+    bothFits = cat(1,fitsRival,fitsStandard);
+    MdataTest = repmat(NdataTest,[2,1,1]);
+    wts = permute(MdataTest./sum(MdataTest),[1,3,2]);
+    inds = categorsmpl(wts(:,1),Nsessions*2*Nperms,'IndexBased');
+    %%% you could decouple across bins, but it's not really necessary
+    bootFits = reshape(bothFits(inds,:,:),Nsessions,2,Nperms,Nstates,Nbins);
+    bootDstrb = permute(mean(diff(bootFits,[],2)),[3,4,5,1,2]);
+    pBoot = mean(MeanImprovement < bootDstrb);
+    
+    % +1 => standard > rival, -1 => rival > standard; 0 => push
+    ISSIG = (pBoot < alp) - pBoot > (1-alp);
+
+end
 
 
-% based on a permutation test
-wtdFitsStandard = fitsStandard.*NdataTest./sum(NdataTest);
-wtdFitsRival = fitsRival.*NdataTest./sum(NdataTest);
-
-% cat rival first because you use diff below
-bothFits = cat(1,wtdFitsRival,wtdFitsStandard);
-
+% wtdFitsStandard = fitsStandard.*NdataTest./sum(NdataTest);
+% wtdFitsRival = fitsRival.*NdataTest./sum(NdataTest);
+% 
+% % cat rival first because you use diff below
+% bothFits = cat(1,wtdFitsRival,wtdFitsStandard);
+% 
 % now sample
-inds = ceil(2*Nsessions*rand(Nsessions*2*Nperms,1));
-bootFits = reshape(bothFits(inds,:,:),Nsessions,2,Nperms,Nstates,Nbins);
-bootDstrb = permute(diff(sum(bootFits),[],2),[3,4,5,1,2]);
-pBoot = mean(MeanImprovement < bootDstrb);
-ISSIGperm = pBoot < alp;
-
-
-keyboard
-bothFits = cat(1,fitsRival,fitsStandard);
-MdataTest = repmat(NdataTest,[2,1,1]);
-wts = permute(MdataTest./sum(MdataTest),[1,3,2]);
-inds = categorsmpl(wts(:,1),Nsessions*2*Nperms,'IndexBased');
-%%% might want to decouple across bins, although it's not necessary
-bootFits = reshape(bothFits(inds,:,:),Nsessions,2,Nperms,Nstates,Nbins);
-bootDstrb = permute(mean(diff(bootFits,[],2)),[3,4,5,1,2]);
-pBoot = mean(MeanImprovement < bootDstrb);
-ISSIGperm = pBoot < alp;
-
+% inds = ceil(2*Nsessions*rand(Nsessions*2*Nperms,1));
+% bootFits = reshape(bothFits(inds,:,:),Nsessions,2,Nperms,Nstates,Nbins);
+% bootDstrb = permute(sum(diff(bootFits,[],2)),[3,4,5,1,2]);
+% pBoot = mean(MeanImprovement < bootDstrb);
+% ISSIGperm = pBoot < alp;
 
 end
 %-------------------------------------------------------------------------%
