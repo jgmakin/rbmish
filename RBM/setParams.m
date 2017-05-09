@@ -1172,23 +1172,23 @@ switch params.datatype
             error('unexpected BMI data file -- jgm');
         end
 
-        
+
         % dynamical params
         params.typeUnits = {{SensoryUnitType},{'Bernoulli'}};
-        
+
         % RBM units
-        [~,Q] = getLatentsBMI([],'double',[],'train',params,...
+        [~,Q,params.badneurons] = getLatentsBMI([],'double',[],'train',params,...
             'sequencelength','singlesequence');
         [NsamplesTrain,Nsensory] = size(Q.R);
         Nhid = Nsensory*4;
         params.numsUnits = {Nsensory, Nhid};
-        
+
         % batch division
         params.EACHBATCHISATRAJ = any(strcmp(params.algorithm,{'RTRBM','TRBM'}));
         params.Npretrain = 0;
         params.NepochsMax = max(floor(NsamplesTrain/250),20);
 
-        % make sure trajs are long enough 
+        % make sure trajs are long enough
         Ntrainingsamples = params.trainingtime/(params.Nmsperbin/1000);
         if params.EACHBATCHISATRAJ
             params.Ncases = min(40,Ntrainingsamples);
