@@ -1,4 +1,4 @@
-function [X,Q] = getLatentsBMI(Nexamples,dataclass,T,testortrain,params,varargin)
+function [X,Q,badneurons] = getLatentsBMI(Nexamples,dataclass,T,testortrain,params,varargin)
 % getLatentsBMI
 %
 % USAGES:
@@ -7,8 +7,13 @@ function [X,Q] = getLatentsBMI(Nexamples,dataclass,T,testortrain,params,varargin
 %
 %   [X,Q] = getLatentsBMI(Nexamples,yrclass,T,'train',params,...
 %       'sequencelength',1000);
+%
+%   [X,Q,badneurons] = getlatentsBMI(...)
+%
 
 %-------------------------------------------------------------------------%
+% Revised: 05/08/17
+%   -returns badneurons, the neurons which are culled
 % Revised: 04/17/17
 %   -added code to remove units that happen to have identical firing
 %   patterns ("duplicates") over either the training or testing portions.
@@ -21,7 +26,7 @@ function [X,Q] = getLatentsBMI(Nexamples,dataclass,T,testortrain,params,varargin
 %   by JGM
 %-------------------------------------------------------------------------%
 
-%%%% TO DO: 
+%%%% TO DO:
 % (1) At the moment, this doesn't work for HHS data.  See the m-files in
 % the directory NeuralAnalysis for how to deal with those....
 
@@ -56,12 +61,17 @@ if 0
 end
 
 % assemble usable "neurons"
-nonDeadUnitInds = arrayfun(@(ii)(~isempty(spikedata{ii})),1:numel(spikedata));
-UnitSpikesT = cell2struct(spikedata(nonDeadUnitInds),'t',1);
+UnitSpikesT = cell2struct(spikedata(:), 't', 2);
 
 % transform kinematic data and spike times into useful data
 [R,X,~] = binSpikeCounts(St,UnitSpikesT,BinParams);
-R = R(:,mean(R)/sperbin>minRate);
+
+too_slow = mean(R)/sperbin <= minRate;
+dead_neurons = arrayfun(@(ii)(isempty(spikedata{ii})),1:numel(spikedata));
+badneurons = too_slow | dead_neurons;
+
+R(:,badneurons) = [];
+
 if isfield(params,'fraction'), R = R(:,1:(floor(end*params.fraction))); end
 
 
