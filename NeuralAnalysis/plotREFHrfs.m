@@ -16,7 +16,7 @@ function plotREFHrfs(wts,params)
 
 % fix the params and then get data
 if checkGPUavailability, dataclass = 'gpuArray'; else dataclass = 'double'; end
-[X,Q] = params.getLatentsBMI([],dataclass,[],'all',params,...
+[X,Q] = params.getLatents([],dataclass,[],'all',params,...
     'sequencelength','singlesequence');
 [R,Q] = params.getData(X,Q);
 

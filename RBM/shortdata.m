@@ -29,7 +29,7 @@ function varargout = shortdata(Nrows,Nways,varargin)
 %       (Nexamples x Ndims x Nmods) -> (Ncases x Ndims x Nmods x Nbatches)
 %
 %   Rshort = shortdata(Ncases,3,Rlong);
-%       (Nexamples x Nunits -> (Ncases x Nunits x Nbatches)
+%       (Nexamples x Nunits) -> (Ncases x Nunits x Nbatches)
 
 
 %-------------------------------------------------------------------------%

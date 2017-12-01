@@ -33,9 +33,9 @@ else
 end
 
 if strcmp(bg,'black')
-    array=-ones(buf+m*(sz+buf),buf+n*(sz+buf));
+    array=-ones(buf+m*(sz+buf),buf+n*(sz+buf),'like',A);
 else
-    array=ones(buf+m*(sz+buf),buf+n*(sz+buf));
+    array=ones(buf+m*(sz+buf),buf+n*(sz+buf),'like',A);
 end
 
 

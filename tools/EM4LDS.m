@@ -20,6 +20,11 @@ function qLDSparams = EM4LDS(Nstates,NepochsMax,datadstrb,getTrajs,varargin)
 
 
 %-------------------------------------------------------------------------%
+% Revised: 09/08/17
+%   -mildly changed the initialization via factor analysis
+%   -changed the criterion for convergence to depend on the size of the
+%   previous cross-entropy *difference from baseline*, rather than the
+%   previous cross-entropy san phrase.
 % Revised: 09/09/16
 %   -added case 'GammaFixedScale' for particle filtering.
 %   -changed what data are collected in the particle E step (to be handed
@@ -62,7 +67,7 @@ function qLDSparams = EM4LDS(Nstates,NepochsMax,datadstrb,getTrajs,varargin)
 %%%% TO DO
 % (0) For the particle filter, new data (at Nrenew) can drastically
 % increase the cross entropy.  (Your temporory solution is not to renew the
-% data.)  How now?  
+% data.)  How now?
 % (1) Here's a problem: for the emission types that require IRLS, and
 % therefore require learning on ONE TRAJECTORY AT A TIME, estimates of the
 % initial position converge quickly to have very small covariances---which
@@ -71,28 +76,32 @@ function qLDSparams = EM4LDS(Nstates,NepochsMax,datadstrb,getTrajs,varargin)
 % starts at the old one's starting location.
 %   -One possibility is to over-write x0 and cov0 for these cases, using
 %   instead *all* the data.
+%       --This can be done with the varargin 'IC domain'.
 
 
 
 % numbers
 NepochsRenew = 1; %%% consider abolishing
-thr = 0.0005;	% 1/20 of a percent
 
 % variable arguments
 iParams     = find(strcmp(varargin,'params')); %%% confusing; should rename
 iData       = find(strcmp(varargin,'data'));
-DIAGCOVS    = defaulter('diagonal covariances',[0,0,0],varargin{:});
-USELOGS     = defaulter('uselogs',1,varargin{:});
-INFRTYPE    = defaulter('inferencetype','exact',varargin{:});
-TOPLOT      = defaulter('toplot',0,varargin{:});
+DIAG_COVS   = defaulter('diagonal covariances',[0,0,0],varargin{:});
+USE_LOGS    = defaulter('uselogs',1,varargin{:});
+infr_type   = defaulter('inferencetype','exact',varargin{:});
+IC_domain   = defaulter('IC domain','first steps',varargin{:});
+TO_PLOT     = defaulter('toplot',0,varargin{:});
 pLDSparams  = defaulter('true dynamics',[],varargin{:});
-initscheme  = defaulter('parameter initialization','random',varargin{:});
-stateinitfunc = defaulter('state initialization',{},varargin{:});
+init_scheme = defaulter('parameter initialization','random',varargin{:});
+state_init_func = defaulter('state initialization',{},varargin{:});
+tol         = defaulter('convergence tolerance',0.0001,varargin{:});
+verbosity   = defaulter('verbosity', 1, varargin{:});
+
 
 % for particle-based approaches
 if checkGPUavailability, dataclass = 'gpuArray'; else dataclass = 'double'; end
-if strcmp(INFRTYPE,'particle')
-    if ~isempty(stateinitfunc)
+if strcmp(infr_type,'particle')
+    if ~isempty(state_init_func)
         error('Need a state initialization function for particle filter');
     end
     
@@ -122,18 +131,19 @@ for iEpoch = 1:NepochsMax
         if iEpoch==1
             if isempty(iParams)
                 qLDSparams = initLDSparams(trajs,Nstates,datadstrb,...
-                    initscheme,DIAGCOVS);
+                    init_scheme,DIAG_COVS);
             else
                 qLDSparams = varargin{iParams+1};
             end
             XNtrpYold = Inf;
+            XNtrpYbase = Inf;
             
             % malloc
             XNtrpY = zeros(1,NepochsMax,'like',trajs(1).Y);
             
             % figure preparation
-            TOPLOT = TOPLOT&usejava('desktop');
-            if TOPLOT
+            TO_PLOT = TO_PLOT&usejava('desktop');
+            if TO_PLOT
                 figureInfoTRAJ = prepareFigure(456,size(trajs(1).Y,1),3);
             else
                 figureInfoTRAJ = [];
@@ -147,7 +157,8 @@ for iEpoch = 1:NepochsMax
     
     %------------------------------- E STEP ------------------------------%
     [xpctT,XNtrpY(iEpoch),infrs] = Estep4LDS(trajs,qLDSparams,pLDSparams,...
-        Nparticles,iEpoch,datadstrb,USELOGS,INFRTYPE,figureInfoTRAJ,stateinitfunc);
+        Nparticles,iEpoch,datadstrb,USE_LOGS,infr_type,IC_domain,...
+        figureInfoTRAJ,state_init_func);
     % if strcmp(pLDSparams.meta, 'RandInitWithEC')
     %%%% broken: you need somehow to pull out separate C and H....
     %     xpctT = enforceNoisilyObservedControls(xpctT,C,H,pLDSparams.T);
@@ -156,29 +167,38 @@ for iEpoch = 1:NepochsMax
     
     
     %------------------------ CHECK FOR CONVERGENCE ----------------------%
-    fractionalImprovement = (XNtrpYold - XNtrpY(iEpoch))/abs(XNtrpYold);
-    XNtrpYold = XNtrpY(iEpoch);
-    fprintf('average cross entropy ')
-    fprintf('= %f on EM epoch %i\n',XNtrpY(iEpoch),iEpoch);
-    if usejava('desktop')
-        animatePlot(figureInfoLL,2:iEpoch,XNtrpY(2:iEpoch));
+    if verbosity > 0
+        fprintf('average cross entropy ')
+        fprintf('= %f on EM epoch %i\n',XNtrpY(iEpoch),iEpoch);
+        if usejava('desktop')
+            animatePlot(figureInfoLL,2:iEpoch,XNtrpY(2:iEpoch));
+        end
     end
-    if (fractionalImprovement < thr)
-        fprintf('exiting with delta LL below tolerance\n');
+    
+    fractionalImprovement = (XNtrpYold-XNtrpY(iEpoch))/(XNtrpYbase-XNtrpYold);
+    % fractionalImprovement = (XNtrpYold - XNtrpY(iEpoch))/abs(XNtrpYold);
+    %%% after Gharamani--not clear if it's any better than yours.  ZG uses
+    %%% (Xold - X)/(X0 - Xold), you used (Xold - X)/abs(Xold).
+    if iEpoch <= 2, XNtrpYbase = XNtrpY(iEpoch); end
+    if (fractionalImprovement < tol) %|| ~isfinite(XNtrpY(iEpoch))
+        fprintf('exiting w/cross-entropy convergence below tolerance\n');
         break
     end
+    XNtrpYold = XNtrpY(iEpoch);
     %---------------------------------------------------------------------%
     
     
     %----------------------------- M STEP --------------------------------%
-    qLDSparams = Mstep4LDS(xpctT,qLDSparams,DIAGCOVS,datadstrb,USELOGS);
+    qLDSparams = Mstep4LDS(xpctT,qLDSparams,DIAG_COVS,datadstrb,USE_LOGS);
     %---------------------------------------------------------------------%
     
     
     
     %-------------------------- COMPARE PARAMS ---------------------------%
-    similarityTransformParams(infrs,trajs,qLDSparams,pLDSparams);
-    Rsqs = getNextFrameRsqs(infrs,trajs,qLDSparams,datadstrb);
+    if verbosity > 1
+        similarityTransformParams(infrs,trajs,qLDSparams,pLDSparams);
+        Rsqs = getNextFrameRsqs(infrs,trajs,qLDSparams,datadstrb);
+    end
     %---------------------------------------------------------------------%
     
 end
@@ -192,7 +212,8 @@ end
 
 %-------------------------------------------------------------------------%
 function [xpctT,XNtrpY,infrs] = Estep4LDS(trajs,qLDSparams,pLDSparams,...
-    Nparticles,iEpoch,dstrb,USELOGS,INFRTYPE,figureInfoTRAJ,stateinitfunc)
+    Nparticles,iEpoch,dstrb,USE_LOGS,infr_type,IC_domain,...
+    figureInfoTRAJ,state_init_func)
 % This is a wrapper for the actual implementation of the E step.  It can
 % call either the exact E-step--assuming everything is linear-Gaussian--or
 % a particle-based approximation.
@@ -206,7 +227,7 @@ BIASEDEMISSIONS = diff(size(qLDSparams.C)) < 0;
 ISERR = 1;
 while ISERR
     try
-        switch INFRTYPE
+        switch infr_type
             case 'exact'
                 [accumT,XNtrpY,infrs,Nsamples] = exactEstep(trajs,...
                     qLDSparams,figureInfoTRAJ);
@@ -215,7 +236,7 @@ while ISERR
                 %%%% have a field 'C'--because, e.g., you don't know the
                 %%%% true model!
                 [accumT,XNtrpY,infrs,Nsamples] = particleEstep(trajs,...
-                    qLDSparams,figureInfoTRAJ,Nparticles,USELOGS,dstrb,stateinitfunc);
+                    qLDSparams,figureInfoTRAJ,Nparticles,USE_LOGS,dstrb,state_init_func);
             otherwise
                 error('not a recognized inference type -- jgm');
         end
@@ -234,11 +255,22 @@ end
 % now renormalize by the number of samples in each
 Ntrajs = length(trajs);
 XNtrpY = XNtrpY/Ntrajs;
-xpctT.mu0 = accumT.muX0/Ntrajs;
-xpctT.x0x0 = accumT.X0X0/Ntrajs;
 xpctT.XpXp = accumT.XpXp/(Nsamples-Ntrajs);
 xpctT.XfXf = accumT.XfXf/(Nsamples-Ntrajs);
 xpctT.XfXp = accumT.XfXp/(Nsamples-Ntrajs);
+switch IC_domain
+    case 'first steps'
+        xpctT.mu0 = accumT.muX0/Ntrajs;
+        xpctT.x0x0 = accumT.X0X0/Ntrajs;
+    case 'all steps' 
+        %%% Technically wrong because you're excluding the last steps
+        %%% Also, I think this will fail if ~BIASEDTRANSITIONS
+        xpctT.mu0 = accumT.muXp/(Nsamples-Ntrajs);
+        xpctT.x0x0 = xpctT.XpXp;
+    otherwise 
+        fprintf('defaulting to ICs based on first steps of each traj\n');
+end
+
 if BIASEDTRANSITIONS
     xpctT.XpXp = [xpctT.XpXp accumT.muXp/(Nsamples-Ntrajs);...
         accumT.muXp'/(Nsamples-Ntrajs) 1];
@@ -279,8 +311,8 @@ end
 %-------------------------------------------------------------------------%
 
 %-------------------------------------------------------------------------%
-function [accumT,XNtrpY,infrs,Nsamples] = exactEstep(trajs,...
-    LDSparams,figureInfo)
+function [accumT,XNtrpY,infrs,Nsamples] = exactEstep(trajs,LDSparams,...
+    figureInfo)
 
 % Ns
 Ntrajs = length(trajs);
@@ -322,7 +354,7 @@ for iTraj = 1:Ntrajs
     accumT.muXp = accumT.muXp + sum(smoothed.XHAT(:,1:end-1),2);
     accumT.muXf = accumT.muXf + sum(smoothed.XHAT(:,2:end),2);
     accumT.muX  = accumT.muX  + sum(smoothed.XHAT,2);
-    accumT.muYX  = accumT.muYX  + sum(trajs(iTraj).Y,2);
+    accumT.muYX = accumT.muYX + sum(trajs(iTraj).Y,2);
     
     % second-order
     accumT.X0X0 = accumT.X0X0 + mucov2op(smoothed.XHAT(:,1),smoothed.XHAT(:,1),smoothed.XCVRN(:,:,1));
@@ -362,7 +394,7 @@ end
 
 %-------------------------------------------------------------------------%
 function [accumT,XNtrpY,infrs,Nsamples] = particleEstep(trajs,LDSparams,...
-    figureInfo,Nparticles,USELOGS,dstrb,stateinitfunc)
+    figureInfo,Nparticles,USE_LOGS,dstrb,state_init_func)
 
 %%%%% TO DO
 % (3) Perhaps EM can be written directly in terms of the weights, Ws, Wzz,
@@ -373,7 +405,7 @@ function [accumT,XNtrpY,infrs,Nsamples] = particleEstep(trajs,LDSparams,...
 Ntrajs = length(trajs);
 
 % initialize
-z0 = stateinitfunc(Nparticles);
+z0 = state_init_func(Nparticles);
 accumT.muX0=0; accumT.muXp=0; accumT.muXf=0; accumT.muX=0; accumT.XfXp=0;
 accumT.X0X0=0; accumT.XpXp=0; accumT.XfXf=0;
 switch dstrb
@@ -388,7 +420,7 @@ end
 XNtrpY=0; Nsamples=0;
 
 % construct the particle filter
-PFfunc = setFilterFunctions(trajs,z0,LDSparams,dstrb,USELOGS);
+PFfunc = setFilterFunctions(trajs,z0,LDSparams,dstrb,USE_LOGS);
 
 % loop through trajectories
 tic
@@ -397,12 +429,12 @@ for iTraj = 1:Ntrajs
     
     % filter and smooth
     [Xtu,Wf,crossEntropy] = PFfunc(iTraj);
-    [Ws,thisXfXp] = particleSmoother(Xtu,Wf,LDSparams,USELOGS);
+    [Ws,thisXfXp] = particleSmoother(Xtu,Wf,LDSparams,USE_LOGS);
     
     
     % expected sufficient statistics for state transitions
     % second-order
-    if USELOGS
+    if USE_LOGS
         XtuW = Xtu.*shiftdim(exp(Ws),-1);
     else
         XtuW = Xtu.*shiftdim(Ws,-1);
@@ -486,7 +518,7 @@ for iTraj = 1:Ntrajs
     
     % plot
     if (iTraj == 1)&&~isempty(figureInfo)
-        if USELOGS
+        if USE_LOGS
             YhatFilter   = outputFunc(permute(tensorOp(Xtu,permute(exp(Wf),[1,3,2])),[1,3,2]));
             YhatSmoother = outputFunc(permute(tensorOp(Xtu,permute(exp(Ws),[1,3,2])),[1,3,2]));
         else 
@@ -506,7 +538,7 @@ end
 %-------------------------------------------------------------------------%
 
 %-------------------------------------------------------------------------%
-function PFfunc = setFilterFunctions(obsvs,z0,qLDSparams,dstrb,USELOGS)
+function PFfunc = setFilterFunctions(obsvs,z0,qLDSparams,dstrb,USE_LOGS)
 
 [Nstates,Nparticles,~] = size(z0);
 
@@ -546,7 +578,7 @@ switch dstrb
 end
 
 %%%% think about changing the dimensions of z0
-if USELOGS
+if USE_LOGS
     PFfunc = @(ii)(particleFilter(obsvs(ii).Y,z0(:,:,ii),...
         transitionFunc,logEmissionFunc,1));
 else
@@ -630,7 +662,7 @@ end
 %-------------------------------------------------------------------------%
 
 %-------------------------------------------------------------------------%
-function qLDSparams = Mstep4LDS(xpctT,qLDSparams,DIAGCOVS,dstrb,USELOGS)
+function qLDSparams = Mstep4LDS(xpctT,qLDSparams,DIAG_COVS,dstrb,USE_LOGS)
 
 USEBUILTIN = 0;
 
@@ -639,7 +671,7 @@ switch dstrb
     case {'GammaFixedScale','Poisson'}
         
         
-        if USELOGS, W = exp(xpctT.W); else W = xpctT.W; end
+        if USE_LOGS, W = exp(xpctT.W); else W = xpctT.W; end
                 
         % use matlab's glmfit, with the option 'weights'
         if USEBUILTIN
@@ -658,7 +690,7 @@ switch dstrb
         end
         
         % now update the structure
-        qLDSparams = ML4LDS(xpctT,qLDSparams,'diagonal covariances',DIAGCOVS);
+        qLDSparams = ML4LDS(xpctT,qLDSparams,'diagonal covariances',DIAG_COVS);
         if size(xpctT.Xtu,1) > size(qLDSparams.C,2)
             qLDSparams.C = C(:,2:end);
             qLDSparams.muYX = C(:,1);
@@ -669,7 +701,7 @@ switch dstrb
     case 'Normal'
         
         % update parameters (M step)
-        qLDSparams = ML4LDS(xpctT,qLDSparams,'diagonal covariances',DIAGCOVS);
+        qLDSparams = ML4LDS(xpctT,qLDSparams,'diagonal covariances',DIAG_COVS);
         
         %%%% Is this necessary any longer?
         % for numerical stability
@@ -836,7 +868,8 @@ end
 %-------------------------------------------------------------------------%
 
 %-------------------------------------------------------------------------%
-function LDSparams = initLDSparams(trajs,Nx,datadstrb,initscheme,DIAGCOVS)
+function LDSparams = initLDSparams(trajs,Nx,datadstrb,init_scheme,DIAG_COVS)
+
 % unload
 Ntrajs = length(trajs);
 Y0 = arrayfun(@(iCase)(trajs(iCase).Y(:,1)),1:Ntrajs,'UniformOutput',0);
@@ -849,7 +882,7 @@ if all(Ts == Ts(1)), T = Ts(1); else T = 'variable'; end
 yrclass = class(Ybroad);
 
 
-switch initscheme
+switch init_scheme
     
     %%% this case still only works with equal-length trajectories
     case 'withData'
@@ -943,24 +976,77 @@ switch initscheme
         
     case 'FactorAnalysis'
         fprintf('Initializing LDS with factor analysis\n');
-        [M,bhat,~,What,SigmaXY] = FactorAnalysis(Ybroad,Nx);
-        Xhat = What*(Ybroad - bhat); %  +...
-        %    chol(SigmaXY)'*randn(size(M,2),size(Ybroad,2));
-        %%%% 
-        % The problem here is that M*What*(Y-b) + b = Y.  That is, M is the
-        % pseudo-inverse of What.  Then when you fit the LDS below, the
-        % emission covariance will be artificially tiny---right??
-        %%%%
         
-        Y = shortdata(Ntrajs,3,Ybroad');
-        Z = shortdata(Ntrajs,3,Xhat');
-        LDSparams = learnfullyobservedLDS(Y,Z,'diagonal covariances',DIAGCOVS);
+        [LDSparams.C,LDSparams.muYX,LDSparams.SigmaYX,W] =...
+            FactorAnalysis(Ybroad,Nx);
         
-        if Ntrajs < length(LDSparams.mu0)
-            LDSparams.mu0 = mean(Xhat,2);
-            LDSparams.Info0 = inv(cov(Xhat')');
+        XhatBroad = W*(Ybroad - LDSparams.muYX);
+        Z = shortdata(Ntrajs,3,XhatBroad');
+        %%%Zp = [longdata(Z(:,:,1:end-1))'; ones(1,NN)];
+        Zp = longdata(Z(:,:,1:end-1))';
+        Zf = longdata(Z(:,:,2:end))';        
+        LDSparams.SigmaX = cov(XhatBroad');
+        if DIAG_COVS(1), LDSparams.SigmaX=diag(diag(LDSparams.SigmaX)); end
+        LDSparams.A = ((Zp*Zp'+LDSparams.SigmaX)\(Zp*Zf'))';
+        %%%%%%
+        clear Zp Zf Z
+                
+%         R=LDSparams.SigmaYX;
+%         Phi=diag(1./diag(R));
+%         temp1=Phi*LDSparams.C;
+%         temp2=Phi-temp1*inv(eye(Nx)+LDSparams.C'*temp1)*temp1';
+%         Wtr = temp2*LDSparams.C;
+%         temp1=(Ybroad - LDSparams.muYX)'*Wtr;
+%         Q=cov(temp1);
+%         t1=temp1(1:end-1,:);
+%         t2=temp1(2:end,:);
+%         A=inv(t1'*t1+Q)*t1'*t2;
+        
+        %%%% There are three differences with Ghahramani:
+        %
+        % (1) LDSparams.A=(inv(Zp*Zp'+LDSparams.SigmaX)*Zp*Zf')';
+        % This would be identical to your MLparams.A if LDSparams.SigmaX
+        % were left out.  I'm not sure why it's there, but it acts like a
+        % regularizer on the elements of A, by assuming they each column 
+        % has mean zero and prior covariance SigmaX.  This is weird.  (Also
+        % NB that, because ZpZp and ZpZf have not been normalized by the
+        % number of samples in Zp and Zf, more data does reduce the impact
+        % of the prior....)
+        % 
+        % (2) LDSparams.SigmaX = cov(XhatBroad');
+        % This seems strange to me: it says that the state-*transition*
+        % covariance is initialized to the same matrix as the prior state
+        % covariance.  That's weird, especially since the former can be
+        % estimated easily (as you do with ML4LDS).
+        %
+        % (3) Zp = longdata(Z(:,:,1:end-1))'
+        % It's a subtle point that EM, at least in certain cases, "needs"
+        % constant terms for transitions as well emissions--see note below.
+        %
+        % (4) A=inv(t1'*t1+Q)*t1'*t2
+        % This is the equation for the transpose of the *standard* state
+        % transition matrix.  That would be fine, except that in his 
+        % kalmansmooth, Xf = Xp*A', i.e. Xf' = A*Xp'.  
+        
+        
+        
+
+%         Y = shortdata(Ntrajs,3,Ybroad');
+%         Z = shortdata(Ntrajs,3,Xhat');
+%         LDSparams = learnfullyobservedLDS(Y,Z,'diagonal covariances',DIAG_COVS);
+
+        
+        if Ntrajs < size(LDSparams.SigmaX,1)
+            LDSparams.mu0 = mean(XhatBroad,2);
+            Cvrn0 = cov(XhatBroad');
+            LDSparams.Info0 = inv(Cvrn0);
+        else
+            %%% fix me: should use just initial points of each traj
+            LDSparams.mu0 = mean(XhatBroad,2);
+            Cvrn0 = cov(XhatBroad');
+            LDSparams.Info0 = inv(Cvrn0);
         end
-        
+        if DIAG_COVS(3), LDSparams.Info0 = diag(1./diag(Cvrn0)); end
 end
 
 LDSparams.T = T;

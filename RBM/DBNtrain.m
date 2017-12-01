@@ -20,10 +20,10 @@ clear; % close all
 
 % params
 % params = setParams('datatype','2Dinteg');
-% params = setParams('datatype','bouncingballs','algorithm','RTRBM');
-params = setParams('datatype','spikecounts','mods',{'M1S1'},...
-    'datafile','Jackson_datafiles/spikes_and_kinematics_jackson_B_26.mat',...
-    'Nmsperbin',64,'trainingtime',320,'SensoryUnitType','Poisson');
+params = setParams('datatype','bouncingballs','algorithm','TRBM');
+% params = setParams('datatype','spikecounts','mods',{'M1S1'},...
+%     'datafile','Indy_datafiles/spikes_and_kinematics_20170509_02.mat',...
+%     'Nmsperbin',50,'trainingtime',320,'SensoryUnitType','Poisson');
 
 if checkGPUavailability, dataclass = 'gpuArray'; else dataclass = 'double'; end
 
@@ -52,7 +52,6 @@ NEFHs       = length(numsUnits)-1;
 Ncases      = params.Ncases;
 Nbatches    = params.Nbatches;
 Ntest       = params.NepochsMax + 1;
-%%%Ntest       = 5;
 NepochsMax  = params.NepochsMax;
 
 

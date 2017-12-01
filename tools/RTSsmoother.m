@@ -95,8 +95,6 @@ end
 end
 %-------------------------------------------------------------------------%
 
-
-
 %-------------------------------------------------------------------------%
 function [XHAT,XCVRN,XfXpCVRN] = RTSSv2(A,XHAT,XCVRN,XHATTU,XfXpCVRN)
 % NB that XHATMU, CVRNMU, and INFOTU are just initialized as XHAT, XCVRN,

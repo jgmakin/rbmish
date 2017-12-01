@@ -50,7 +50,7 @@ X0 = X(endinds(1:end-1)+1,:);
 
 % Now find the last Ndims rows of the A matrix---call them Aacc'
 accFuture = XFuture(:,end-Ndims+1:end);
-[Aacc, RsqCV] = linregress(XPast,accFuture,'LOO');
+[Aacc, RsqCV] = linregress(XPast,accFuture,'cross validate','LOO');
 fprintf('row %i fit with R^2 = %0.3f\n\n',[1+Nstates-(Ndims:-1:1);RsqCV]);
 A(end-Ndims+1:end,:) = Aacc';
 

@@ -90,15 +90,17 @@ while col<=ncols
         s= [s,' ',lab];
     end
     disp(setstr(s))
-    for i=1:nrows,
+    for i=1:nrows
         s = rlab(rpos(i)+1:rpos(i+1)-1);
         if length(s)>len, s=s(1:len); else s=[space(ones(1,len-length(s))),s]; end
         s = [' ',s];
-        for j=0:n,
+        for j=0:n
             element = a(i,col+j);
-            if element==0,
+            if element==0
                 s=[s,'            0'];
-            elseif (element>=1.e6)|(element<=-1.e5)|(abs(element)<.0001)
+            elseif isequal(fix(element),element)
+                s=[s,sprintf(' %12d',element)];
+            elseif (element>=1.e6)||(element<=-1.e5)||(abs(element)<.0001)
                 s=[s,sprintf(' %12.5e',element)];
             else
                 s=[s,sprintf(' %12.5f',element)];

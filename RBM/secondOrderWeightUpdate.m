@@ -49,11 +49,13 @@ if length(unique(m)) > 1
     wdotNEW = zeros(size(wdot),'like',wdot);
     for iGrp = 1:length(m)
         inds = startinds(iGrp):endinds(iGrp);
-        wdotNEW(inds,:) = -k(iGrp)/m(iGrp)*Ts*w(inds,:) +...
-            (0.98-b(iGrp)/m(iGrp)*Ts)*wdot(inds,:) + Ts/m(iGrp)*u(inds,:);
+        mm = m(iGrp)/Ts;                % normalize units so that Ts = 1
+        wdotNEW(inds,:) = -k(iGrp)/mm*w(inds,:) +...
+            (0.98-b(iGrp)/mm)*wdot(inds,:) + u(inds,:)/mm;
     end
 else
-    wdotNEW = (-k(1)/m(1)*Ts)*w + (0.98-b(1)/m(1)*Ts)*wdot + (Ts/m(1))*u;
+    mm = m(1)/Ts;                       % normalize units so that Ts = 1
+    wdotNEW = (-k(1)/mm)*w + (0.98-b(1)/mm)*wdot + u/mm;
 end
 wNEW = w + Ts*wdotNEW;
 

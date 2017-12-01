@@ -448,7 +448,7 @@ AllRsqs = zeros(n,N);
 % compute errors
 for i = 1:n
     Y = varargin{i};
-    [beta, AllRsqs(i,:)] = linregress([Y ones(M,1)],Xlong,'LOO');
+    [beta, AllRsqs(i,:)] = linregress([Y ones(M,1)],Xlong,'cross validate','LOO');
 end
 
 end
@@ -600,7 +600,7 @@ function [RsqXYX,RsqYX,em] = fitAndInvertEmission(X,em)
 % fit
 if isempty(em.SigmaYX)
     Y = em.Y;
-    [beta, RsqYX, ResCV] = linregress(X,Y,'LOO');
+    [beta, RsqYX, ResCV] = linregress(X,Y,'cross validate','LOO');
     muYX = mean(ResCV);
     SigmaYX = cov(ResCV);
     em.inds = 1:size(Y,1);

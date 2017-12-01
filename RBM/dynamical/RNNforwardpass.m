@@ -41,7 +41,7 @@ USEGPU = 0;
 % Ns
 Nhids = size(HidInit,2);
 
-% precompute the "input biases," i.e. Wrr*input + b.
+% precompute the "input biases," i.e. Wir*input + b.
 Wrr = W(1:Nhids,:);              % hiddens on left!
 Wir = W((Nhids+1):end,:);
 Binput = Inputs*Wir + b;

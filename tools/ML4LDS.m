@@ -66,7 +66,8 @@ end
 
 % prior parameters
 MLparams.mu0 = t.mu0;
-MLparams.Info0 = inv(t.x0x0 - t.mu0*t.mu0');
+Cvrn0 = t.x0x0 - t.mu0*t.mu0';
+MLparams.Info0 = inv(Cvrn0);
 % --- (1) --- %
 
 
@@ -74,7 +75,7 @@ if any(DIAGCOVS)
     fprintf('Assuming diagonal covariance matrices...\n');
     if DIAGCOVS(1), MLparams.SigmaX = diag(diag(MLparams.SigmaX)); end
     if DIAGCOVS(2)&&isfield(t,'XX'), MLparams.SigmaYX = diag(diag(MLparams.SigmaYX)); end
-    if DIAGCOVS(3), MLparams.Info0 = diag(diag(MLparams.Info0)); end
+    if DIAGCOVS(3), MLparams.Info0 = diag(1./diag(Cvrn0));
 end
 
 end

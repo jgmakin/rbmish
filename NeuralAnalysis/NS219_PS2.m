@@ -349,7 +349,7 @@ Z = zscore(R2);
 %--- YOU NEED TO WRITE THIS FUNCTION ---%
 % Do something with Xavg and Z to get the C matrix
 % C = ...
-[beta, RsqCV, ZResCV] = linregress(Xavg,Z,'LOO');
+[beta, RsqCV, ZResCV] = linregress(Xavg,Z,'cross validate','LOO');
 C = beta';
 figure; hist(RsqCV,20);
 % Hint: when you're finished, you may need to transpose something....  

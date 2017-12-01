@@ -22,7 +22,7 @@ function val = defaulter(name,defaultval,varargin)
 
 
 iVal = find(strcmp(varargin,name));
-if ~isempty(iVal), val = varargin{iVal+1}; else val=defaultval; end
+if ~isempty(iVal), val = varargin{iVal+1}; else, val = defaultval; end
 
 
 end

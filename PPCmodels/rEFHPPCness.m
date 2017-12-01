@@ -193,7 +193,7 @@ X = longdata(Xtrain(:,:,t0:end));
 %X = [X,ones(size(X,1),1)];
 Y = longdata(Ytrain(:,:,t0:end));
 
-[beta, RsqCV] = linregress(X,Y,'LOO');
+[beta, RsqCV] = linregress(X,Y,'cross validate','LOO');
 X = longdata(Xtest(:,:,t0:end));
 %X = [X,ones(size(X,1),1)];
 Y = longdata(Ytest(:,:,t0:end));

@@ -162,8 +162,8 @@ X1 = [X(:,1) ones(N,1)];        Y1 = Y(:,1);
 X2 = [X(:,2) ones(N,1)];        Y2 = Y(:,2);
 
 % fit an affine ("linear") model
-[beta1, RsqCV1] = linregress(X1,Y1,'LOO');
-[beta2, RsqCV2] = linregress(X2,Y2,'LOO');
+[beta1, RsqCV1] = linregress(X1,Y1,'cross validate','LOO');
+[beta2, RsqCV2] = linregress(X2,Y2,'cross validate','LOO');
 
 % get error stats
 YHAT = [X1*beta1,X2*beta2];

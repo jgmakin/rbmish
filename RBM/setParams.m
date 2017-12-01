@@ -1163,6 +1163,7 @@ switch params.datatype
         params.trainingtime = defaulter('trainingtime',320,varargin{:});
         % 320 seconds; also can choose 'half'.
         params.fraction = defaulter('fraction',1,varargin{:});
+        params.hidsensoryratio = defaulter('hidsensoryratio',4,varargin{:});
         
         if any(strcmp(datafile(1:4),{'Indy','Loco','Jack'}))
             params.Fs = 250;
@@ -1180,7 +1181,8 @@ switch params.datatype
         [~,Q,params.badneurons] = getLatentsBMI([],'double',[],'train',params,...
             'sequencelength','singlesequence');
         [NsamplesTrain,Nsensory] = size(Q.R);
-        Nhid = Nsensory*4;
+        Nhid = floor(Nsensory*params.hidsensoryratio); % defaults to 4x
+        
         params.numsUnits = {Nsensory, Nhid};
 
         % batch division
@@ -1201,7 +1203,7 @@ switch params.datatype
         % sparsity? (0.20,0.95,0.05)
         sparse.cost = 0.20;
         sparse.phidNewFrac = 0.95;
-        sparse.phidTarget = 0.05;
+        sparse.phidTarget = defaulter('phidtarget',0.05,varargin{:});
         params.sparse = sparse;
         
         % learning rates

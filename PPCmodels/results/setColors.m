@@ -27,7 +27,9 @@ OPTcolor = [0 0 0];                                 % black
 OBScolor = [255,255,179]/255;                       % yellow
 EMcolor = [251,128,114]/255;                        % red-ish
 XTRAcolor = [179,222,105]/255;                      % green
-PINKish = [252,205,229]/255;                        % pinkish
+pinkish = [252,205,229]/255;                        % pinkish
+mustardcolor = [255,237,111]/255;                   % mustard color
+
 
 % weird things
 OBSNOUcolor = [255,255,179]/255;                    % yellow

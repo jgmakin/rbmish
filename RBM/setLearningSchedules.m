@@ -117,18 +117,18 @@ switch GROWTH
         hyperbolicGrowth = @(x0,ii)(x0*Ts^2/(1-(ii-1)/params.NepochsMax));
         
         % mass grows according to a hyperbola
-        params.mw = @(iEp)(hyperbolicGrowth(mw0,iEp));
+        params.mw  = @(iEp)(hyperbolicGrowth(mw0,iEp));
         params.mvb = @(iEp)(hyperbolicGrowth(mvb0,iEp));
         params.mhb = @(iEp)(hyperbolicGrowth(mhb0,iEp));
         
         % damping coefficients also follow a hyperbola, so the *momentum* 
         % is fixed---at 1-b/m*Ts = 1 - 0.08 = 0.92.
-        params.bw = @(iEp)(hyperbolicGrowth(0.08*mw0/Ts,iEp));
+        params.bw  = @(iEp)(hyperbolicGrowth(0.08*mw0/Ts,iEp));
         params.bvb = @(iEp)(hyperbolicGrowth(0.08*mvb0/Ts,iEp));
         params.bhb = @(iEp)(hyperbolicGrowth(0.08*mhb0/Ts,iEp));
         
         % no weight decay
-        params.kw = @(iEp)(0);
+        params.kw  = @(iEp)(0);
         params.kvb = @(iEp)(0);
         params.khb = @(iEp)(0);
         

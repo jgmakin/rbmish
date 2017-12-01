@@ -11,11 +11,13 @@ function getRemoteData(filename,serverloc,clientloc)
 if ~exist([clientloc,filename],'file')
     if strcmp(computer,'GLNXA64')
         command = ['scp makin@7layerburrito.cin.ucsf.edu:',...
-            serverloc,filename,' ',clientloc,'.'];
+            serverloc, filename,' ',clientloc,'.'];
         unix(command);
     else
-        command = ['pscp -scp -unsafe makin@7layerburrito:',...
-            serverloc,filename,' ',clientloc,'.'];
+        %command = ['pscp -scp -unsafe makin@7layerburrito:',...
+        %    serverloc, filename,' ',clientloc,'.'];
+        command = ['pscp -scp -unsafe makin@domestica:',...
+            serverloc, filename,' ',clientloc,'.'];
         dos(command);
         %%% DOS programs always return status = 0, even when they work
     end

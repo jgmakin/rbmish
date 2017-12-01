@@ -1,4 +1,4 @@
-function [X,Q,badneurons] = getLatentsBMI(Nexamples,dataclass,T,testortrain,params,varargin)
+function [X,Q,bad_neurons] = getLatentsBMI(Nexamples,dataclass,T,testortrain,params,varargin)
 % getLatentsBMI
 %
 % USAGES:
@@ -53,12 +53,10 @@ BinParams.Nstates = size(St(1).X,2);
 BinParams.BINMETHOD = 'void';
 
 % assemble kinematic state
-if 0
-    kinematicsFilterOrder = 2;
-    kinematicsFilterCutoff = 6;
-    [bbb,aaa] = butter(kinematicsFilterOrder,kinematicsFilterCutoff/(Fs/2));
-    X = filtfilt(bbb,aaa,X);
-end
+% kinematicsFilterOrder = 2;
+% kinematicsFilterCutoff = 6;
+% [bbb,aaa] = butter(kinematicsFilterOrder,kinematicsFilterCutoff/(Fs/2));
+% X = filtfilt(bbb,aaa,X);
 
 % assemble usable "neurons"
 UnitSpikesT = cell2struct(spikedata(:), 't', 2);
@@ -66,12 +64,11 @@ UnitSpikesT = cell2struct(spikedata(:), 't', 2);
 % transform kinematic data and spike times into useful data
 [R,X,~] = binSpikeCounts(St,UnitSpikesT,BinParams);
 
-too_slow = mean(R)/sperbin <= minRate;
+% reject slow, missing, or "extra" neurons
+slow_neurons = mean(R)/sperbin <= minRate;
 dead_neurons = arrayfun(@(ii)(isempty(spikedata{ii})),1:numel(spikedata));
-badneurons = too_slow | dead_neurons;
-
-R(:,badneurons) = [];
-
+bad_neurons = slow_neurons | dead_neurons;
+R(:,bad_neurons) = [];
 if isfield(params,'fraction'), R = R(:,1:(floor(end*params.fraction))); end
 
 
@@ -83,8 +80,6 @@ switch trainingtime
         NbinsTrain = floor(trainingtime/sperbin);
 end
 
-
-
 % which bins? which neurons?
 binsTrain   = 1:NbinsTrain;
 binsTest    = getTestBins(NbinsTrain,size(X,1),sperbin,params.datafile);
@@ -95,7 +90,6 @@ testDuplicates  = findDuplicates(R(binsTest,:));
 duplicates = [trainDuplicates; testDuplicates];
 fprintf('removing %i ''duplicate'' neuron(s)...\n',length(duplicates));
 neurons = logical(prod((1:size(R,2))~=duplicates,1));
-
 
 % now sub-select bins, neurons
 switch testortrain
@@ -117,7 +111,9 @@ switch params.typeUnits{1}{1} %%% assume only one
         % info to leak into the training.  On the other hand, normalization
         % should be applied to the whole trajectory, not the random set of
         % minibatches assembled below.
-        R = (R - mean(R))./std(R);
+        %%%R = (R - mean(R))./std(R);
+        R = 2*sqrt(R + 3/8);
+        
         %%% R = (R - mean(R))/chol(cov(R));
     case 'Bernoulli'
         R(R>1) = 1;

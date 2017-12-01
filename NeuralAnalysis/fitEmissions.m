@@ -18,7 +18,7 @@ function params = fitEmissions(X,Y,params)
 
 
 % fit
-[beta, RsqCV, ResCV] = linregress([X ones(size(X,1),1)],Y,'LOO');
+[beta, RsqCV, ResCV] = linregress([X ones(size(X,1),1)],Y,'cross validate','LOO');
 
 % plot
 figure(472); clf; hist(RsqCV,20);

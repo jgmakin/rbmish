@@ -41,10 +41,9 @@ clear Rtrain Qtrain
 Vtest = LDSobsfxn(Rtest,Qtest,wts,params);
 clear Rtest Qtest
 
-
 % decode
 [XhatStatic,RsqStatic,XhatDynamic,RsqDynamic,Bv,LDSparamsObs] =...
-    filterDecoder(Vtrain,Xtrain,Vtest,Xtest,1,SStot);
+    filterDecoder(Vtrain,Xtrain,Vtest,Xtest,1,SStot,params.Nmsperbin);
 
 % report -<SNR>
 testError = mean(10*log10(1 - RsqStatic(:))); 
@@ -66,8 +65,8 @@ end
 function obsvs = LDSobsfxn(R0,Q,wts,params)
 
 % Ns
-numsUnits = params.numsUnits;
-Nlayers = length(numsUnits);
+Nunits = params.numsUnits{end};
+Nlayers = length(params.numsUnits);
 Mlayers = length(wts)/2+1;
 Nsamples = size(R0,1);
 T = Q.T;
@@ -77,11 +76,10 @@ clear Q;
 [R1,Z0] = updownRDBN(R0,wts,params,T);
 if Nlayers == Mlayers
     % for the final layer of the rEFH, use all units...
-    U1 = invParamMap(Z0,wts{Nlayers}(1:end-1,1:sum(numsUnits{end})),...
-        wts{Nlayers}(end,1:sum(numsUnits{end})),params.typeUnits{end},...
-        params.numsUnits{end},params);
+    U1 = invParamMap(Z0,wts{Nlayers}(1:end-1,1:sum(Nunits)),...
+        wts{Nlayers}(end,1:sum(Nunits)),params.typeUnits{end},...
+        Nunits,params);
     obsvs = [R1,U1,Z0,ones(Nsamples,1,'like',R0)];
-%    obsvs = Z0;
 else
     % ...for the early layers, don't use the hidden units
     obsvs = R1;

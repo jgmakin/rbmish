@@ -17,8 +17,10 @@ function [Rsqs,NdataTest] = filtersForNeuralData(wts,params,LDSparamsEM,...
 
 % init
 if checkGPUavailability, dataclass = 'gpuArray'; else, dataclass = 'double'; end
-tplotmax = 60; % s
-if TOPLOT, tvec = 1:ceil(tplotmax/(params.Nmsperbin/1000)); else, tvec=[]; end
+Nsplot = 60;
+Nmsperbin = params.Nmsperbin;
+Nmspers = 1000; % fact
+if TOPLOT, tvec = 1:ceil(Nsplot/(Nmsperbin/Nmspers)); else, tvec=[]; end
 
 % get data
 [Rtrain,Xtrain,Qtrain] = getSingleTrainingSequence(dataclass,params);
@@ -28,53 +30,106 @@ NdataTest = size(Rtest,1);
 if ~isempty(tvec), PosVelPlot(tvec,Xtest,1); end
 
 
-
-
 % (1) (static) linear regression
 if any(strcmp(decodernames,'static'))
-    [beta,Xhat,RsqStatic] = staticLinearDecoder(Rtrain,Xtrain,...
-        Rtest,Xtest,SStot,tvec);
+    [~,~,RsqStatic] = staticLinearDecoder(Rtrain,Xtrain,...
+        Rtest,Xtest,SStot);
     Rsqs(:,:,:,strcmp(decodernames,'static'))       = RsqStatic;
 end
 
-% (2) observed LDS + KF
+
+% (2) observed LDS filtered with KF
 if any(strcmp(decodernames,'kfobs'))
-    [LDSparamsObs, KFdstrbsObs, RTSSdstrbsObs, RsqKF_Obs, RsqRTSS_Obs] = ...
-        fullyObservedLDSDecoder(Rtrain,Xtrain,Qtrain.T,Rtest,Xtest,SStot,tvec);
+    [LDSparamsObs,~,RsqKF_Obs] = ...
+        fullyObservedLDSDecoder(Rtrain,Xtrain,Qtrain.T,Rtest,Xtest,SStot);
     Rsqs(:,:,:,strcmp(decodernames,'kfobs'))        =...
         RsqKF_Obs(:,:,:,any(strcmp(decodernames,'kfobs')));
-    Rsqs(:,:,:,strcmp(decodernames,'rtssobs'))      =...
-        RsqRTSS_Obs(:,:,:,any(strcmp(decodernames,'rtssobs')));
+    %Rsqs(:,:,:,strcmp(decodernames,'rtssobs'))      =...
+    %   RsqRTSS_Obs(:,:,:,any(strcmp(decodernames,'rtssobs')));
 end
 
-% (3,4) KF with latent state, plus regresion to kinematics
+
+% (3,4) KF with latent state + (static map | KF)
 if any(ismember(decodernames,{'kfemstatic','kfemdynamic'}))
-    [LDSparamsEM, Bxz_EM, LDSparamsObs, RsqKF_EMstatic,RsqKF_EMdynamic] =....
-        latentStateLDSDecoder(Rtrain,Xtrain,Rtest,Xtest,params,LDSparamsEM,...
-        SStot,tvec);
+    
+    NhiddenStates = floor(params.numsUnits{1}/3);
+    
+    % training-data generator function
+    getTrainingData = @(yrclass)(EFHdata2LDSdata(1,...
+        @()( deal(Rtrain,Xtrain) )));
+    [LDSparamsEM,Bxz_EM,LDSparamsObs,~,RsqKF_EMstatic,~,RsqKF_EMdynamic] =....
+        latentStateLDSDecoder(getTrainingData,Rtrain,Xtrain,Rtest,Xtest,...
+        params.Nmsperbin,NhiddenStates,LDSparamsEM,SStot);
     Rsqs(:,:,:,strcmp(decodernames,'kfemstatic'))   =...
         RsqKF_EMstatic(:,:,:,any(strcmp(decodernames,'kfemstatic')));
     Rsqs(:,:,:,strcmp(decodernames,'kfemdynamic'))  =...
         RsqKF_EMdynamic(:,:,:,any(strcmp(decodernames,'kfemdynamic')));
+
+    % and now save it for future use
+    if strcmp(params.datafile(1:6),'Chewie')
+        filesuffix = [params.datafile(end-7:end-4),...
+            params.datafile(end-11:end-8),'_01.mat'];
+    else
+        filesuffix = params.datafile(end-14:end);
+    end
+    
+    subdir = 'scratch/';
+    %%%subdir = 'EMparams/';
+    save(sprintf('%sRBMish/BMI/%sLDSOrd%03d_%s_%s_%imsBins_%03dsTrainingtime_%s',...
+        getdir('data'),subdir,NhiddenStates,params.datatype,...
+        params.typeUnits{1}{1},params.Nmsperbin,params.trainingtime,...
+        filesuffix),'LDSparamsEM','LDSparamsObs','Bxz_EM');
 end
+
 
 % (5) UKF
 if any(strcmp(decodernames,'ukf'))
-    %if any(strncmp(decodernames,'ukf',3))
-    %ukfname = decodernames{strncmp(decodernames,'ukf',3)};
-    %Ntapspast = str2double(ukfname(4));
-    %Ntapsfuture = str2double(ukfname(5));
-    [UKFparams, RsqUKF] = UKFDecoder(Rtrain,Xtrain,Qtrain.T,...
-        Rtest,Xtest,SStot,tvec);
-    %%%Rsqs(:,:,:,strncmp(decodernames,'ukf',3))       = RsqUKF;
+    [UKFparams,~,RsqUKF] = UKFDecoder(Rtrain,Xtrain,Qtrain.T,...
+        Rtest,Xtest,SStot,'ftaps',0,'ptaps',1,'htaps',0);
     Rsqs(:,:,:,strcmp(decodernames,'ukf'))          = RsqUKF;
 end
 
-% (6,7) rEFH
+
+% (6) UKF with taps
+if any(strcmp(decodernames,'ukfwithtaps'))
+    ptaps = floor(128/Nmsperbin) + 1;
+    ftaps = floor(128/Nmsperbin);
+    [UKFparams, RsqUKFwithtaps] = UKFDecoder(Rtrain,Xtrain,Qtrain.T,...
+        Rtest,Xtest,SStot,'ftaps',ftaps,'ptaps',ptaps);
+    Rsqs(:,:,:,strcmp(decodernames,'ukfwithtaps'))  = RsqUKFwithtaps;
+end
+
+
+% (7) Wiener filter
+if any(strcmp(decodernames,'wf'))
+    [betaWF, RsqWF] = WFDecoder(Rtrain,Xtrain,Qtrain.T,params.Nmsperbin,...
+        Rtest,Xtest);
+    % NB that we don't pass SStot to this decoder because the testing set
+    % will be a few samples (Nbin_of_history) shy of the full set.
+    Rsqs(:,:,:,strcmp(decodernames,'wf'))          = RsqWF;
+end
+
+
+% (8,9) rEFH
 if any(ismember(decodernames,{'refhstatic','refhdynamic',...
         'refhstatic_stdnrml','refhdynamic_stdnrml'}))
-    [RsqREFHstatic,RsqREFHdynamic] = linearREFHDecoder(Rtrain,Xtrain,Qtrain,...
-        Rtest,Xtest,Qtest,wts,params,SStot,tvec);
+    
+    [wts,~,RsqREFHstatic,~,RsqREFHdynamic] = linearREFHDecoder(Rtrain,Xtrain,...
+        Qtrain,Rtest,Xtest,Qtest,wts,params,SStot);
+    
+    % and now save it for future use
+    if strcmp(params.datafile(1:6),'Chewie')
+        filesuffix = [params.datafile(end-7:end-4),...
+            params.datafile(end-11:end-8),'_01.mat'];
+    else
+        filesuffix = params.datafile(end-14:end);
+    end
+    basedir = 'scratch';
+    %%%basedir = 'spikecounts';
+    save(sprintf('%sRBMish/EFHs/%s/wts_%s_%s_%iHid_%imsBins_%03dsTrainingtime_%s',...
+        getdir('data'),basedir,params.datatype,params.typeUnits{1}{1},params.numsUnits{2},...
+        params.Nmsperbin,params.trainingtime,filesuffix),'wts','params');
+    
     Rsqs(:,:,:,strcmp(decodernames,'refhstatic'))   =... 
         RsqREFHstatic(:,:,:,any(strcmp(decodernames,'refhstatic')));
     Rsqs(:,:,:,strcmp(decodernames,'refhdynamic'))  =... 
@@ -87,7 +142,7 @@ end
 
 
 
-% (8,9) Poisson emissions (particle filter)
+% (10,11) Poisson emissions (particle filter)
 if any(ismember(decodernames,{'particlefilter','particlesmoother'}))
     [LDSparamsPE, PFdstrbs, PSdstrbs, RsqPF, RsqPS] = ...
         fullyObservedPoissonDecoder(trainData,testData,SStot);
@@ -97,7 +152,7 @@ if any(ismember(decodernames,{'particlefilter','particlesmoother'}))
         RsqPS(:,:,:,any(strcmp(decodernames,'particlesmoother')));
 end
 
-% (10,11) observations linear in polar transform of vel (particle filter)
+% (12,13) observations linear in polar transform of vel (particle filter)
 if any(ismember(decodernames,{'polarpf','polarps'}))
     [LDSparamsPolar, PolarPFdstrbs, PolarPSdstrbs, RsqPolarPF, RsqPolarPS] = ...
         fullyObservedPolarDecoder(LDSparamsObs,trainData,testData,SStot);
@@ -106,9 +161,6 @@ if any(ismember(decodernames,{'polarpf','polarps'}))
     Rsqs(:,:,:,strcmp(decodernames,'polarps'))      =...
         RsqPolarPS(:,:,:,any(strcmp(decodernames,'polarps')));
 end
-
-
-
 
 
 if 0
@@ -123,7 +175,6 @@ if 0
     toc
     YHATEM = LDSparamsEM.C*KFdstrbsEM.XHATTU + LDSparamsEM.muYX;
     SStotY = sum((Rtest(2:end,:) - mean(Rtest(2:end,:))).^2);
-    
     
     keyboard
     RsqsAvg = averageDecentRsqs(sum(diff(Rtest).^2),SStotY,3241)
@@ -163,7 +214,7 @@ end
 
 %-------------------------------------------------------------------------%
 function [beta, Xhat, RsqStatic] = staticLinearDecoder(Ytrain,Xtrain,...
-    Ytest,Xtest,SStot,tvec)
+    Ytest,Xtest,SStot)
 
 % decoder
 beta = linregress([Ytrain,ones(size(Ytrain,1),1)],Xtrain);
@@ -173,41 +224,6 @@ RsqStatic = 1 - SSerr./SStot;
 
 % plot?
 if ~isempty(tvec), PosVelPlot(tvec,Xhat,0); end
-
-end
-%-------------------------------------------------------------------------%
-
-%-------------------------------------------------------------------------%
-function [LDSparamsOBS, KFdstrbs, RTSSdstrbs, RsqKF, RsqRTSS] = ...
-    fullyObservedLDSDecoder(Ytrain,Xtrain,T,Ytest,Xtest,SStot,tvec)
-
-% Ns
-Nexamples = size(Ytrain,1);
-Ntraj = floor(Nexamples/T);
-
-% train
-LDSparamsOBS = learnfullyobservedLDS(shortdata(Ntraj,3,Ytrain),...
-    shortdata(Ntraj,3,Xtrain));
-
-% but use *all* data to get initial state (overwrite)
-LDSparamsOBS.mu0 = mean(Xtrain)';
-LDSparamsOBS.Info0 = inv(cov(Xtrain));
-
-% test: filter, smoother
-tic;
-KFdstrbs    = KalmanFilter(LDSparamsOBS,gather(Ytest'));
-SSerr       = sum((KFdstrbs.XHATMU' - Xtest).^2);
-RsqKF       = 1 - SSerr./SStot;
-RTSSdstrbs  = RTSsmoother(LDSparamsOBS,KFdstrbs);
-SSerr       = sum((RTSSdstrbs.XHAT' - Xtest).^2);
-RsqRTSS     = 1 - SSerr./SStot;
-toc;
-
-% plot?
-if ~isempty(tvec)
-    PosVelPlot(tvec,KFdstrbs.XHATMU',0);
-    PosVelPlot(tvec,RTSSdstrbs.XHAT',0);
-end
 
 end
 %-------------------------------------------------------------------------%
@@ -323,227 +339,6 @@ SSerr = sum((ZhatS - Ztest).^2,2)';
 RsqPS = 1 - SSerr./SStot;
 toc;
 
-
-
-end
-%-------------------------------------------------------------------------%
-
-%-------------------------------------------------------------------------%
-function [LDSparamsEM, Bxz_EM, LDSparamsObs, RsqStatic, RsqDynamic] =...
-    latentStateLDSDecoder(Rtrain,Xtrain,Rtest,Xtest,params,...
-    LDSparamsEM,SStot,tvec)
-
-
-% learn a new system?
-if isempty(LDSparamsEM)
-    tic;
-    Mstates = floor(params.numsUnits{1}/3);
-    NepochsMax = 100;
-    getTrajs = @(yrclass)(EFHdata2LDSdata(1,...
-        @()(getSingleTrainingSequence('double',params))));
-    LDSparamsEM = EM4LDS(Mstates,NepochsMax,'Normal',getTrajs,...
-        'diagonal covariances',[1,1,0],...
-        'parameter initialization','FactorAnalysis');
-    toc
-    
-    % and now save it for future use
-    if strcmp(params.datafile(1:6),'Chewie')
-        filesuffix = [params.datafile(end-7:end-4),...
-            params.datafile(end-11:end-8),'_01.mat'];
-    else
-        filesuffix = params.datafile(end-14:end);
-    end
-    
-    subdir = 'scratch/';
-    %%%subdir = '';
-    save(sprintf('%sRBMish/BMI/%sLDSOrd%03d_%s_%s_%imsBins_%03dsTrainingtime_%s',...
-        getdir('data'),subdir,Mstates,params.datatype,params.typeUnits{1}{1},...
-        params.Nmsperbin,params.trainingtime,filesuffix),'LDSparamsEM');
-end
-
-% "observed variables"
-LDSparamsEM.T   = size(Rtrain,1);
-KFdstrbsTrainEM = KalmanFilter(LDSparamsEM,double(Rtrain'),'lightweight',1);
-Vtrain          = [KFdstrbsTrainEM.XHATMU',ones(LDSparamsEM.T,1)];
-clear KFdstrbsTrainEM Rtrain
-LDSparamsEM.T   = size(Rtest,1);
-KFdstrbsTestEM  = KalmanFilter(LDSparamsEM,double(Rtest'),'lightweight',1);
-Vtest           = [KFdstrbsTestEM.XHATMU', ones(LDSparamsEM.T,1)];
-clear KFdstrbsTestEM
-
-% decode
-[~,RsqStatic,XhatDynamic,RsqDynamic,Bxz_EM,LDSparamsObs] =...
-    filterDecoder(Vtrain,Xtrain,Vtest,Xtest,1,SStot);
-
-% plot?
-if ~isempty(tvec), PosVelPlot(tvec,XhatDynamic,0); end
-
-end
-%-------------------------------------------------------------------------%
-
-%-------------------------------------------------------------------------%
-function [RsqStatic,RsqDynamic] = linearREFHDecoder(...
-    Rtrain,Xtrain,Qtrain,Rtest,Xtest,Qtest,wts,params,SStot,tvec)
-
-
-% if necessary, train an rEFH
-if isempty(wts)
-    
-    if checkGPUavailability, dataclass = 'gpuArray'; else dataclass = 'double'; end
-    numsUnits = params.numsUnits;
-    datagenargs = {};
-    if isfield(params,'EACHBATCHISATRAJ')
-        EACHBATCHISATRAJ = params.EACHBATCHISATRAJ;
-    else
-        EACHBATCHISATRAJ = 0;
-    end
-    if isfield(params,'Npretrain')
-        Npretrain = params.Npretrain;
-    else
-        Npretrain = 0;
-    end
-    if isfield(params,'sparse')
-        sparsitycost= params.sparse.cost;
-        estimRate   = params.sparse.phidNewFrac;
-        phidTarget  = params.sparse.phidTarget;
-    else
-        sparsitycost= 0;
-    end
-    getLatents  = params.getLatents;
-    getData     = params.getData;
-    NEFHs       = length(numsUnits)-1;
-    Ncases      = params.Ncases;
-    Nbatches    = params.Nbatches;
-    Ntest       = params.NepochsMax + 1;
-    NepochsMax  = params.NepochsMax;
-    
-    % init
-    paramDisplay(params);
-    wts = cell(NEFHs*2,1);
-    
-    % pretraining
-    for iEFH = 1:NEFHs
-        fprintf(1,'Pretraining Layer %i w/EFH: %d-%d \n',...
-            iEFH,sum(numsUnits{iEFH}),sum(numsUnits{iEFH+1}));
-        RESTART = 1;
-        
-        % train
-        tic; EFH; toc;
-        
-        % pack together weights for saving (hid => recog., vis => gener.)
-        wts{iEFH} = [vishid; hidbiases];
-        wts{NEFHs*2-iEFH+1} = [vishid'; visbiases'];
-    end
-    
-    % and now save it for future use
-    if strcmp(params.datafile(1:6),'Chewie')
-        filesuffix = [params.datafile(end-7:end-4),...
-            params.datafile(end-11:end-8),'_01.mat'];
-    else
-        filesuffix = params.datafile(end-14:end);
-    end
-    basedir = 'scratch';
-    %%%basedir = 'spikecounts';
-    save(sprintf('%sRBMish/EFHs/%s/wts_%s_%s_%iHid_%imsBins_%03dsTrainingtime_%s',...
-        getdir('data'),basedir,params.datatype,params.typeUnits{1}{1},params.numsUnits{2},...
-        params.Nmsperbin,params.trainingtime,filesuffix),'wts','params');
-end
-
-% test
-[~,~,RsqStatic,XhatDynamic,RsqDynamic] = testEFHBMI(...
-    Rtest,Xtest,Qtest,wts,params,Rtrain,Xtrain,Qtrain,SStot);
-
-% plot?
-if ~isempty(tvec), PosVelPlot(tvec,XhatDynamic,0); end
-
-end
-%-------------------------------------------------------------------------%
-
-%-------------------------------------------------------------------------%
-function [UKFparams, RsqUKF] = UKFDecoder(Rtrain,Xtrain,T,Rtest,Xtest,...
-    SStot,tvec,varargin)
-% function [UKFparams, RsqUKF] = UKFDecoder(Rtrain,Xtrain,T,Rtest,Xtest,...
-%   SStot,tvec,Ntapspast,Ntapspast);
-%
-% UKFdecoder wrapper file
-%
-% Rtrain - training spike rates  - Nsamples x Nneurons
-% Xtrain - traning kinematics    - Nsamples x Nstates
-% T      - num training samples  - Nsamples x 1
-% Rtest  - testing spike rates   - Nsamples x Nneurons
-% Xtest  - testing kinematics    - Nsamples x Nstates
-% SStot  - sumsquares of testing - 1        x Nstates
-%          SStot = sum((Xtest - mean(Xtest)).^2);
-% tvec   - unused
-
-%-------------------------------------------------------------------------%
-% Revised: 04/18/17
-%   -added arguments, code to control the tap order
-% Created: 04/13/17
-%   by JEO
-%-------------------------------------------------------------------------%
-
-% taps, etc.
-fparams = [];  % extra params for f, not needed
-ftaps = defaulter('ftaps',2,varargin{:});       % future taps
-ptaps = defaulter('ptaps',3,varargin{:});       % past taps
-mtaps = defaulter('mtaps',1,varargin{:});       % backbone; <=ftaps+ptas
-htaps = defaulter('htaps',1,varargin{:});       % spiking history taps
-alphamax = 16; % maximum regularization (ridge regression) parameter
-
-% f: backbone (px py vx vy ax ay) -> variables encoded linearly by spikes
-f = @(a,b)([...
-    a;...
-    sqrt(a(1,:).^2+a(2,:).^2);...
-    sqrt(a(3,:).^2+a(4,:).^2);...
-    sqrt(a(5,:).^2+a(6,:).^2);...
-    a(1,:).*a(3,:);...
-    a(2,:).*a(4,:);...
-    ]);
-
-% fit
-params = fit_ar_ukf_hist_rrcv(Xtrain,Rtrain,f,fparams,...
-    ftaps,ptaps,mtaps,htaps,alphamax);
-
-% re-fit initial states from *all* training data
-xinit = mean(Xtrain);
-vinit = cov(Xtrain);
-
-% test
-[XhatUKF, ~] = ar_ukf_hist(Rtest,params,xinit,vinit,1);
-
-% compute R^2 using predictions for *current* kinematic vars
-Nstates = size(Xtrain,2);
-indsNow = (1:Nstates) + (ptaps-1)*Nstates;
-RsqUKF = 1 - sum((XhatUKF(:,indsNow)- Xtest).^2)./SStot;
-
-% todo fill these
-UKFparams.A = params.F;
-UKFparams.SigmaX = [];
-UKFparams.nuX = [];
-UKFparams.C = [];
-UKFparams.SigmaYX = [];
-UKFparams.muYX = [];
-UKFparams.mu0 = [];
-UKFparams.Cvrn0 = [];
-UKFparams.T = [];
-UKFparams.params = params;
-
-if ~isempty(tvec), PosVelPlot(tvec,XhatUKF,0); end
-
-end
-%-------------------------------------------------------------------------%
-
-%-------------------------------------------------------------------------%
-function RsqsAvg = averageDecentRsqs(SSerr,SStot,fignum)
-
-Rsqs = 1 - SSerr./SStot;
-%figure(fignum)
-%imagesc(reshape(Rsqs,[4,292/4]));
-%colorbar
-
-foo = sort(Rsqs);
-RsqsAvg = mean(foo(50:end));
 
 
 end

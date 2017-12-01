@@ -152,7 +152,7 @@ end
 
 
 % regress
-[beta,RsqCV,ResCV] = linregress(Xp,Xf,'LOO');
+[beta,RsqCV,ResCV] = linregress(Xp,Xf,'cross validate','LOO');
 fprintf('A fit with R^2 = %0.3f\n\n',RsqCV);
 
 % store

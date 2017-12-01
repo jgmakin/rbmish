@@ -165,15 +165,17 @@ for t = 1:T
         % no cross-entropy contribution--decrement the denominator
         Nsteps = Nsteps-1;
     else
+        % useful quantity
+        CvrnCtr = CvrnTU*C';
         
         % measurement update
-        K = CvrnTU*C'/(thisCvrnYX + C*CvrnTU*C');
+        K = CvrnCtr/(thisCvrnYX + C*CvrnCtr);
         innov = Y(:,t) - C*xhatTU;
         xhatMU = xhatTU + K*innov;
-        CvrnMU = CvrnTU - K*C*CvrnTU;
+        CvrnMU = CvrnTU - K*CvrnCtr';
         
         % cross-entropy of Y under the model: <-log{q(y;theta)}>_p(y)
-        CvrnY = C*CvrnTU*C' + thisCvrnYX;
+        CvrnY = C*CvrnCtr + thisCvrnYX;
         thisXNtrpY = GaussianCrossEntropy(innov,CvrnY,'cvrn',0);
         XNtrpY = XNtrpY + thisXNtrpY;
     end
@@ -243,7 +245,7 @@ for t = 1:T
     % time update
     InfoTU = inv(A/InfoMU*A' + SigmaX(:,:,min(t,size(SigmaX,3))));
     xhatTU = A*xhatMU + muX(:,t);
-    
+
 end
 XNtrpY = XNtrpY/T;      % i.e., time-averaged cross entropy (sensible)
 
