@@ -21,7 +21,7 @@ What exactly has to be specified in your new case in `setParams.m`?  A good case
  - `getLatents`: a function that generates the _data_ latent variables
    - inputs: 
      - `Nexamples`, an integer specifying the number of examples per epoch
-     - `dataclass`, a string specifying either `double` or `gpuArray` (in which case the code will execute the gpu-version)
+     - `dataclass`, a string specifying either `'double'` or `'gpuArray'` (in which case the code will execute the gpu-version)
    - outputs: 
      - `X` a matrix of _data_ latent variables of size `[Nexamples, ...]`
      - `Q` a structure for holding other miscellaneous parameters required to generate the training data
@@ -39,7 +39,7 @@ What exactly has to be specified in your new case in `setParams.m`?  A good case
      - `R`, a tensor of data (observed) variables, of size `[Nexamples, sum(params.numsUnits{1})]`
      - `Q`, the input structure of whatever else was needed to generate the data, possibly modified to reflect something about the data generation
    During training, `X` and `Q` will be returned as outputs from `getLatents` and passed as inputs to `getData`.  So, if you're going to train on synthetic data, `getLatents` basically corresponds to the prior, and `getData` to the emission.  If you're training on real data stored somewhere, you can just write the function you assign to `getData` so that it ignores its inputs.
- - `testEFH`: 
+ - `testEFH`: a function for evaluating your EFH
    - inputs: 
      - `R`, the (observed) testing data,
      - `X`, the _latent_ variables of the testing data, if available
@@ -49,5 +49,13 @@ What exactly has to be specified in your new case in `setParams.m`?  A good case
    - outputs:
      - `e`, some scalar measuring how well or badly your model is doing.
      Don't set this to be the n-step reconstruction error, because that will be reported independently in any case.  Instead, e.g., if you're using synthetic data, this function could infer the latent variables of the EFH and compare (somehow) to the "true" latent variables `X`.  Or in sequential data (synthetic or not), one could infer the hidden vector of the EFH and then use this to predict the next observable data in the sequence (see `testEFHNextFrameError.m`, e.g.), and then report the mean error.  Or etc.
- - `getTestData`: A function for generating the data on which the EFH will be tested by `params.testEFH`.  It should return `R`, `X`, and `Q`, in that order: the observed variables, the latent variables (if they're available), and a catch-all structure for anything else.  However, since the outputs of this function _only_ ever get used by `params.testEFH`, the user is really free to set them to whatever he likes, as long as they are compatible with the function he has assigned to `params.testEFH`.
+ - `getTestData`: A function for generating the data on which the EFH will be tested by `params.testEFH`.  
+   - inputs:
+     - `dataclass`: either `'double'` or `'gpuArray'`.  The latter will instruct this function to place data on the GPU.
+   - outputs: 
+     - `R`, the observed variables, 
+     - `X`, the latent variables (if they're available)
+     - `Q`, a catch-all structure for anything else.  
+     
+   But since the outputs of this function _only_ ever get used by `params.testEFH`, the user is really free to set them to whatever he likes, as long as they are compatible with the function he has assigned to `params.testEFH`.
    
