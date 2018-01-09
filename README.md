@@ -9,7 +9,11 @@ To run an EFH on your own data, you basically do three things:
      - generating the latent and observed variables of the testing data
      - computing some kind of scalar-valued learning measure (for the main code to plot; this can be omitted) 
   2. Add a new case to `setParams.m` specifying these functions and the hyperparameters for the EFH you'd like to train; 
-  3. Change the call to `setParams` in `DBNtrain.m` (~line 23) to specify your case.  Then you can just call `DBNtrain` from the command line.
+  3. Change the call to `setParams` in `DBNtrain.m` (~line 23) to specify your case:
+  
+        ```params = setParams('datatype','my_new_case');```
+        
+     Then you can just call `DBNtrain` from the command line.
 
 What exactly has to be specified in your new case in `setParams.m`?  A good case to copy is `'polyphonicmusic'`.  You don't have to set everything set in that case, but you will certainly want to set the following:
  - `numsUnits`, a cell array of integers/vectors of integers
@@ -59,3 +63,6 @@ What exactly has to be specified in your new case in `setParams.m`?  A good case
      
    But since the outputs of this function _only_ ever get used by `params.testEFH`, the user is really free to set them to whatever he likes, as long as they are compatible with the function he has assigned to `params.testEFH`.
    
+   
+## How to run your own recurrent EFH
+...
