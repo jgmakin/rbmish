@@ -66,3 +66,5 @@ What exactly has to be specified in your new case in `setParams.m`?  A good case
    
 ## How to run your own recurrent EFH
 ...
+
+## How to use the rEFH in as brain-machine interface decoder
