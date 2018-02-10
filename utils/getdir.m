@@ -1,4 +1,4 @@
-function yrdir = getdir(dirtype)
+    function yrdir = getdir(dirtype)
 % getdir    Return a string with this computer's directory of type dirtype
 
 %-------------------------------------------------------------------------%
