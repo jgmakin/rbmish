@@ -97,7 +97,7 @@ errorStatMat = zeros(Nxprmts,Nruns);
 ydataTensor = zeros(params.NepochsMax/Ntest,Nxprmts,Nruns);
 
 try
-    sendmail('makin@phy.ucsf.edu',...
+    sendmail('person@thing.edu',...
         sprintf('started training %s on %s',params.datatype,params.machine));
 catch ME
     fprintf('failed to send e-mail...\n');
